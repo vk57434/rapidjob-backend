@@ -64,7 +64,7 @@ class AuthController {
                     email: user.email,
                     role: user.role
                 },
-                process.env.JWT_SECRET || '093e5628ca98688637d44e61efa0c065a9bc71dfb211842b9529ef319cd1de42',
+                process.env.JWT_SECRET || '8349bf2d1e90b21a97a8fd088eb8ec823300fc373ba9d4ca21dae945ce2e28c8',
                 { expiresIn: '7d' }
             );
             console.log('✅ Backend JWT generated successfully');
