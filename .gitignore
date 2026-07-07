@@ -1,0 +1,31 @@
+# Node modules
+node_modules/
+
+# Environment
+.env
+.env.*
+
+# Firebase Admin Key
+firebase-admin.json
+
+# Logs
+logs/
+*.log
+
+# Uploads
+uploads/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Build
+dist/
+build/
+
+# Coverage
+coverage/
