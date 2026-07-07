@@ -5,8 +5,9 @@ node_modules/
 .env
 .env.*
 
-# Firebase Admin Key
+# Firebase Admin Keys
 firebase-admin.json
+rapidjob-f6a1f-*.json
 
 # Logs
 logs/
@@ -29,3 +30,6 @@ build/
 
 # Coverage
 coverage/
+
+# Certificates
+*.pem

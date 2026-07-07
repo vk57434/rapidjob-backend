@@ -5,28 +5,39 @@ const path = require("path");
 let serviceAccount;
 
 /**
- * Priority:
- * 1. FIREBASE_SERVICE_ACCOUNT_JSON (Environment Variable for Render/Production)
- * 2. firebase-admin.json (Local file for development)
+ * FIREBASE ADMIN INITIALIZATION
+ * Support for Local Development (JSON file) and Production (Environment Variable)
  */
-try {
-    if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+
+// Priority 1: Environment Variable (Production/Render)
+if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+    try {
         serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
-        console.log("Firebase Admin: Initializing using environment variable.");
-    } else {
-        const serviceAccountPath = path.join(__dirname, "../firebase-admin.json");
-        if (fs.existsSync(serviceAccountPath)) {
-            serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, "utf8"));
-            console.log("Firebase Admin: Initializing using local JSON file.");
-        } else {
-            console.warn("Firebase Admin: No credentials found. Set FIREBASE_SERVICE_ACCOUNT_JSON or add firebase-admin.json.");
-        }
+        console.log("Firebase Admin: Initializing using FIREBASE_SERVICE_ACCOUNT_JSON environment variable.");
+    } catch (error) {
+        console.error("Firebase Admin: CRITICAL ERROR - Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON:", error.message);
+        process.exit(1);
     }
-} catch (error) {
-    console.error("Firebase Admin: Failed to parse credentials:", error.message);
+}
+// Priority 2: Local JSON File (Development)
+else {
+    const localPath = path.join(__dirname, "../firebase-admin.json");
+    if (fs.existsSync(localPath)) {
+        try {
+            serviceAccount = require(localPath);
+            console.log("Firebase Admin: Initializing using local firebase-admin.json file.");
+        } catch (error) {
+            console.error("Firebase Admin: CRITICAL ERROR - Failed to load local firebase-admin.json:", error.message);
+            process.exit(1);
+        }
+    } else {
+        console.error("Firebase Admin: CRITICAL ERROR - No credentials found! Either set FIREBASE_SERVICE_ACCOUNT_JSON environment variable or add firebase-admin.json locally.");
+        process.exit(1);
+    }
 }
 
-if (!admin.apps.length && serviceAccount) {
+// Initialize the app only once
+if (!admin.apps.length) {
     try {
         admin.initializeApp({
             credential: admin.credential.cert(serviceAccount),
@@ -35,14 +46,16 @@ if (!admin.apps.length && serviceAccount) {
         });
         console.log("Firebase Admin: Application initialized successfully.");
     } catch (error) {
-        console.error("Firebase Admin: Initialization error:", error.message);
+        console.error("Firebase Admin: CRITICAL ERROR - Initialization failed:", error.message);
+        process.exit(1);
     }
 }
 
-const db = admin.apps.length ? admin.firestore() : null;
-const rtdb = admin.apps.length ? admin.database() : null;
-const auth = admin.apps.length ? admin.auth() : null;
-const storage = admin.apps.length ? admin.storage() : null;
+// Export individual services for easy access
+const db = admin.firestore();
+const rtdb = admin.database();
+const auth = admin.auth();
+const storage = admin.storage();
 
 module.exports = {
     admin,
