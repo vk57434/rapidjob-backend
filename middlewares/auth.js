@@ -1,31 +1,29 @@
 const { auth } = require('../config/firebaseAdmin');
 
 const verifyToken = async (req, res, next) => {
-    console.log('Verifying Token | Header:', req.headers.authorization ? 'Present' : 'Missing');
+    const authHeader = req.headers.authorization;
 
-    const idToken = req.headers.authorization?.split('Bearer ')[1];
-
-    if (!idToken) {
-        console.error('Auth Middleware Error: No Bearer token provided');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        console.error('Auth Middleware: Token missing or malformed header');
         return res.status(401).json({
             success: false,
             stage: 'Authorization Header',
-            message: 'Unauthorized: No token provided'
+            message: 'No token provided. Expected format: Bearer <token>'
         });
     }
 
+    const idToken = authHeader.split('Bearer ')[1];
+
     try {
-        console.log('Auth Middleware: Verifying Firebase ID Token...');
         const decodedToken = await auth.verifyIdToken(idToken);
-        console.log('Auth Middleware: Token valid for UID:', decodedToken.uid);
         req.user = decodedToken;
         next();
     } catch (error) {
-        console.error('Auth Middleware Error: Invalid token:', error.message);
+        console.error('Auth Middleware: Token verification failed:', error.message);
         return res.status(401).json({
             success: false,
-            stage: 'Token Verification',
-            message: 'Unauthorized: Invalid token'
+            stage: 'JWT Verification',
+            message: 'Invalid or expired token'
         });
     }
 };

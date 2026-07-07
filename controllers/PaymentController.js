@@ -2,119 +2,114 @@ const PaymentService = require('../services/PaymentService');
 const { db, rtdb } = require('../config/firebaseAdmin');
 
 class PaymentController {
+    /**
+     * POST /api/payment/create-order
+     * Creates a Razorpay Order and returns order_id to Android.
+     */
     async createOrder(req, res) {
-        console.log('Incoming createOrder request:', req.body);
-
+        console.log('Incoming Order Request:', req.body);
         try {
-            const { amount, currency = 'INR', receipt } = req.body;
+            const { amount, currency, receipt } = req.body;
 
             if (!amount) {
                 return res.status(400).json({
-                    error: 'Amount is required'
+                    success: false,
+                    stage: 'Validation',
+                    message: 'Amount is required'
                 });
             }
 
-            const order = await PaymentService.createOrder(
-                amount,
-                currency,
-                receipt
-            );
-
-            console.log('Razorpay order created:', order.id);
-
-            return res.json(order);
-
+            // amount must be Integer (paise)
+            const order = await PaymentService.createOrder(parseInt(amount), currency, receipt);
+            console.log('Razorpay Order Created:', order.id);
+            res.json(order);
         } catch (error) {
-            console.error('Razorpay Order Creation Error:', error);
-
-            return res.status(500).json({
-                error: 'Failed to create Razorpay order',
-                details: error.message
+            console.error('Order Creation Error:', error);
+            res.status(500).json({
+                success: false,
+                stage: 'Razorpay API',
+                message: error.message
             });
         }
     }
 
+    /**
+     * POST /api/payment/verify
+     * Verifies payment signature and activates subscription.
+     */
     async verify(req, res) {
-        console.log('Incoming verification request:', req.body);
-
+        console.log('Incoming Verification Request:', req.body);
         try {
-            const {
-                razorpay_order_id,
-                razorpay_payment_id,
-                razorpay_signature,
-                planId
-            } = req.body;
-
+            const { razorpay_order_id, razorpay_payment_id, razorpay_signature, planId } = req.body;
             const uid = req.user.uid;
 
-            if (
-                !razorpay_order_id ||
-                !razorpay_payment_id ||
-                !razorpay_signature
-            ) {
+            if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
                 return res.status(400).json({
-                    error: 'Missing verification parameters'
+                    success: false,
+                    stage: 'Validation',
+                    message: 'Missing verification parameters'
                 });
             }
 
-            const isValid = PaymentService.verifySignature(
-                razorpay_order_id,
-                razorpay_payment_id,
-                razorpay_signature
-            );
+            const isValid = PaymentService.verifySignature(razorpay_order_id, razorpay_payment_id, razorpay_signature);
 
             if (!isValid) {
+                console.warn('Invalid Payment Signature detected for order:', razorpay_order_id);
                 return res.status(400).json({
-                    error: 'Invalid signature'
+                    success: false,
+                    stage: 'Signature Verification',
+                    message: 'Invalid signature'
                 });
             }
 
-            const paymentData = {
+            console.log('Payment Verified | UID:', uid);
+
+            // 1. Save payment record
+            const paymentRef = db.collection('payments').doc(razorpay_payment_id);
+            await paymentRef.set({
                 orderId: razorpay_order_id,
                 paymentId: razorpay_payment_id,
                 userId: uid,
-                planId: planId || 'premium_monthly',
-                gateway: 'razorpay',
+                planId: planId || 'default',
                 status: 'verified',
+                gateway: 'razorpay',
                 timestamp: new Date().toISOString()
-            };
+            });
 
-            await db.collection('payments').add(paymentData);
-
-            const expiryDate = new Date();
-            expiryDate.setDate(expiryDate.getDate() + 30);
+            // 2. Calculate Expiry (30 days from now)
+            const expiry = new Date();
+            expiry.setDate(expiry.getDate() + 30);
 
             const subscriptionData = {
                 userId: uid,
                 planId: planId || 'premium_monthly',
                 startDate: new Date().toISOString(),
-                expiryDate: expiryDate.toISOString(),
+                expiryDate: expiry.toISOString(),
                 isActive: true,
                 updatedAt: new Date().toISOString()
             };
 
-            await db.collection('subscriptions').doc(uid).set(subscriptionData);
+            // 3. Update Firestore (Atomic Write)
+            const batch = db.batch();
+            batch.set(db.collection('subscriptions').doc(uid), subscriptionData);
+            batch.set(db.collection('job_seeker_subscriptions').doc(uid), subscriptionData);
+            await batch.commit();
 
-            await db.collection('job_seeker_subscriptions').doc(uid).set(subscriptionData);
-
+            // 4. Update RTDB for instant UI refresh
             await rtdb.ref(`subscriptions/${uid}`).set({
                 isActive: true,
-                expiryDate: expiryDate.getTime(),
+                expiryDate: expiry.getTime(),
                 planId: planId || 'premium_monthly',
                 updatedAt: Date.now()
             });
 
-            return res.json({
-                success: true,
-                message: 'Payment verified and subscription activated'
-            });
-
+            res.json({ success: true, message: 'Subscription activated successfully' });
         } catch (error) {
-            console.error('Payment verification error:', error);
-
-            return res.status(500).json({
-                error: 'Verification failed',
-                details: error.message
+            console.error('Verification Error:', error);
+            res.status(500).json({
+                success: false,
+                stage: 'Fulfillment',
+                message: error.message
             });
         }
     }
