@@ -7,11 +7,13 @@ class AuthController {
      * Verifies Firebase ID token and issues a custom backend JWT.
      */
     async login(req, res) {
-        console.log('Incoming Login Sync:', req.body);
+        console.log('====== AuthController.login ======');
+        console.log('Incoming Login Sync:', JSON.stringify(req.body, null, 2));
         try {
             const { idToken } = req.body;
 
             if (!idToken) {
+                console.log('Validation Error: idToken is missing');
                 return res.status(400).json({
                     success: false,
                     stage: 'Validation',
@@ -20,25 +22,41 @@ class AuthController {
             }
 
             // 1. Verify the Firebase ID Token (Source of Truth)
-            console.log('Verifying Firebase ID Token...');
+            console.log('Step 1: Verifying Firebase ID Token...');
             const decodedToken = await auth.verifyIdToken(idToken);
             const uid = decodedToken.uid;
-            console.log('Token Verified | UID:', uid);
+            const email = decodedToken.email;
+            console.log('✅ Token Verified | UID:', uid, '| Email:', email);
 
-            // 2. Fetch user profile from Firestore
+            // 2. Fetch or create user profile from Firestore
+            console.log('Step 2: Reading user document from Firestore...');
+            console.log('📖 Reading users/', uid);
             const userDoc = await db.collection('users').doc(uid).get();
+            
+            let user;
             if (!userDoc.exists) {
-                console.error('User not found in Firestore | UID:', uid);
-                return res.status(404).json({
-                    success: false,
-                    stage: 'Firestore Lookup',
-                    message: 'User profile not found in database. Please register.'
-                });
+                console.log('⚠️ User not found in Firestore | UID:', uid, '- Creating new user document');
+                // Create default user document
+                const defaultUser = {
+                    uid: uid,
+                    email: email,
+                    fullName: email?.split('@')[0] || 'User',
+                    role: 'JOB_SEEKER',
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString(),
+                    profileCompleted: false,
+                    memberSince: new Date().getFullYear().toString()
+                };
+                console.log('✍️ Writing new user document to Firestore:', JSON.stringify(defaultUser, null, 2));
+                await db.collection('users').doc(uid).set(defaultUser);
+                console.log('✅ New user document created successfully!');
+                user = defaultUser;
+            } else {
+                user = userDoc.data();
+                console.log('✅ User document found:', JSON.stringify(user, null, 2));
             }
 
-            const user = userDoc.data();
-            console.log('Login Successful | Email:', user.email);
-
+            console.log('Step 3: Generating backend JWT...');
             // 3. Issue a custom Backend JWT signed with the secret provided by the user
             const backendToken = jwt.sign(
                 {
@@ -49,14 +67,18 @@ class AuthController {
                 process.env.JWT_SECRET || '093e5628ca98688637d44e61efa0c065a9bc71dfb211842b9529ef319cd1de42',
                 { expiresIn: '7d' }
             );
+            console.log('✅ Backend JWT generated successfully');
 
+            console.log('====== AuthController.login: SUCCESS ======');
             res.json({
                 success: true,
                 token: backendToken, // App will use this for future Bearer Auth
                 user
             });
         } catch (error) {
-            console.error('Auth Controller Error:', error);
+            console.error('❌ AuthController.login ERROR:');
+            console.error('Error Message:', error.message);
+            console.error('Error Stack:', error.stack);
             res.status(401).json({
                 success: false,
                 stage: 'Verification/JWT Issue',
