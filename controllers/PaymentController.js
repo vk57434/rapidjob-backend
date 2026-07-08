@@ -170,7 +170,7 @@ class PaymentController {
             console.log('PAYMENT: Updating Firestore subscriptions...');
             const batch = db.batch();
             batch.set(db.collection('subscriptions').doc(uid), subscriptionData);
-            batch.set(db.collection('job_seeker_subscriptions').doc(uid), subscriptionData);
+            batch.set(db.collection('jobSeekerSubscriptions').doc(uid), subscriptionData);
             await batch.commit();
             console.log('PAYMENT: Firestore updated successfully');
 
