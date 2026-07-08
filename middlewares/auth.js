@@ -1,12 +1,16 @@
-const jwt = require('jsonwebtoken');
+const { auth } = require('../config/firebaseAdmin');
 
+/**
+ * Middleware to verify Firebase ID Token using Firebase Admin SDK.
+ * Replaces legacy JWT verification.
+ */
 const verifyToken = async (req, res, next) => {
     const authHeader = req.headers.authorization;
 
-    console.log('Auth Middleware: Incoming request with authorization header:', authHeader ? 'Present' : 'Missing');
+    console.log('[BACKEND AUTH] Incoming Request Header:', authHeader ? 'Present' : 'Missing');
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        console.error('Auth Middleware: Token missing or malformed header');
+        console.error('[BACKEND AUTH] Missing or malformed Authorization header');
         return res.status(401).json({
             success: false,
             stage: 'Authorization Header',
@@ -14,32 +18,52 @@ const verifyToken = async (req, res, next) => {
         });
     }
 
-    const token = authHeader.split('Bearer ')[1];
-    console.log('Auth Middleware: Token extracted, length:', token.length);
+    const idToken = authHeader.split('Bearer ')[1];
 
-    try {
-        const jwtSecret = process.env.JWT_SECRET || '8349bf2d1e90b21a97a8fd088eb8ec823300fc373ba9d4ca21dae945ce2e28c8';
-        
-        const decodedToken = jwt.verify(token, jwtSecret);
-        console.log('Auth Middleware: Token verified successfully for UID:', decodedToken.uid);
-        
-        req.user = decodedToken;
-        next();
-    } catch (error) {
-        console.error('Auth Middleware: Token verification failed:', error.message);
-        console.error('Auth Middleware: Error name:', error.name);
-        
-        let errorMessage = 'Invalid or expired token';
-        if (error.name === 'TokenExpiredError') {
-            errorMessage = 'Token has expired';
-        } else if (error.name === 'JsonWebTokenError') {
-            errorMessage = 'Invalid token format';
-        }
-        
+    // Safety check for common mistakes
+    if (!idToken || idToken === 'null' || idToken === 'undefined' || idToken === '') {
+        console.error('[BACKEND AUTH] Invalid token value received:', idToken);
         return res.status(401).json({
             success: false,
-            stage: 'JWT Verification',
-            message: errorMessage
+            stage: 'Token Extraction',
+            message: 'Invalid token value received'
+        });
+    }
+
+    console.log('[BACKEND AUTH] Token Extracted (length):', idToken.length);
+
+    try {
+        // Requirement: Verify Firebase ID Token using Admin SDK
+        console.log('[BACKEND AUTH] Firebase Token Verification started...');
+        const decodedToken = await auth.verifyIdToken(idToken);
+
+        console.log('[BACKEND AUTH] Decoded UID:', decodedToken.uid);
+        console.log('[BACKEND AUTH] Decoded Email:', decodedToken.email);
+
+        // Attach user info to request object
+        req.user = {
+            uid: decodedToken.uid,
+            email: decodedToken.email,
+            name: decodedToken.name || decodedToken.email?.split('@')[0],
+            auth_provider: decodedToken.firebase.sign_in_provider
+        };
+
+        next();
+    } catch (error) {
+        console.error('[BACKEND AUTH] Firebase Verification Failure:', error.message);
+
+        let errorMessage = 'Authentication failed';
+        if (error.code === 'auth/id-token-expired') {
+            errorMessage = 'Firebase ID Token has expired';
+        } else if (error.code === 'auth/argument-error') {
+            errorMessage = 'Invalid Firebase ID Token format';
+        }
+
+        return res.status(401).json({
+            success: false,
+            stage: 'Firebase ID Token Verification',
+            message: errorMessage,
+            error_code: error.code
         });
     }
 };

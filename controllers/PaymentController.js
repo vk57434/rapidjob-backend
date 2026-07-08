@@ -7,54 +7,26 @@ class PaymentController {
      * Creates a Razorpay Order and returns order_id to Android.
      */
     async createOrder(req, res) {
-        console.log('=== PAYMENT: CREATE ORDER REQUEST ===');
-        console.log('Request Body:', JSON.stringify(req.body));
-        console.log('User from JWT:', req.user ? { uid: req.user.uid, email: req.user.email } : 'Not authenticated');
+        const uid = req.user.uid;
+        console.log(`[PAYMENT] createOrder | UID: ${uid} | User: ${req.user.email}`);
         
         try {
             const { amount, currency, planId } = req.body;
-            const uid = req.user.uid;
 
-            // Validation
-            if (!amount) {
-                console.error('PAYMENT ERROR: Amount is missing from request');
+            if (!amount || !planId) {
+                console.error('[PAYMENT] Validation Error: amount or planId missing');
                 return res.status(400).json({
                     success: false,
                     stage: 'Validation',
-                    message: 'Amount is required'
+                    message: 'Amount and Plan ID are required'
                 });
             }
 
-            if (!planId) {
-                console.error('PAYMENT ERROR: Plan ID is missing from request');
-                return res.status(400).json({
-                    success: false,
-                    stage: 'Validation',
-                    message: 'Plan ID is required'
-                });
-            }
+            console.log(`[PAYMENT] Creating order | Amount: ${amount} | Currency: ${currency || 'INR'} | Plan: ${planId}`);
 
-            if (!uid) {
-                console.error('PAYMENT ERROR: User UID not found in JWT token');
-                return res.status(401).json({
-                    success: false,
-                    stage: 'Authentication',
-                    message: 'User not authenticated'
-                });
-            }
-
-            console.log('PAYMENT: Creating order for UID:', uid, '| Amount:', amount, '| Currency:', currency || 'INR', '| Plan:', planId);
-
-            // amount must be Integer (paise)
-            const receipt = `rcpt_${uid}_${Date.now()}`;
+            const receipt = `rcpt_${uid.substring(0, 8)}_${Date.now()}`;
             const order = await PaymentService.createOrder(parseInt(amount), currency || 'INR', receipt, planId);
             
-            console.log('PAYMENT: Razorpay Order Created Successfully');
-            console.log('Order ID:', order.id);
-            console.log('Order Amount:', order.amount);
-            console.log('Order Currency:', order.currency);
-
-            // Return response with key_id for Android
             const response = {
                 success: true,
                 orderId: order.id,
@@ -64,15 +36,11 @@ class PaymentController {
                 receipt: order.receipt
             };
 
-            console.log('PAYMENT: Sending response to Android:', JSON.stringify(response));
+            console.log('[PAYMENT] Order Created Successfully:', order.id);
             res.json(response);
             
         } catch (error) {
-            console.error('=== PAYMENT: ORDER CREATION ERROR ===');
-            console.error('Error Stage: Razorpay API');
-            console.error('Error Message:', error.message);
-            console.error('Error Stack:', error.stack);
-            
+            console.error('[PAYMENT] Order Creation Error:', error.message);
             res.status(500).json({
                 success: false,
                 stage: 'Razorpay API',
@@ -86,21 +54,14 @@ class PaymentController {
      * Verifies payment signature and activates subscription.
      */
     async verify(req, res) {
-        console.log('=== PAYMENT: VERIFICATION REQUEST ===');
-        console.log('Request Body:', JSON.stringify(req.body));
-        console.log('User from JWT:', req.user ? { uid: req.user.uid, email: req.user.email } : 'Not authenticated');
+        const uid = req.user.uid;
+        console.log(`[PAYMENT] verify | UID: ${uid} | User: ${req.user.email}`);
         
         try {
-            const { razorpay_order_id, razorpay_payment_id, razorpay_signature, planId } = req.body;
-            const uid = req.user.uid;
+            const { razorpayOrderId, razorpayPaymentId, razorpaySignature, planId } = req.body;
 
-            // Validation
-            if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
-                console.error('PAYMENT ERROR: Missing verification parameters');
-                console.error('razorpay_order_id:', razorpay_order_id ? 'Present' : 'Missing');
-                console.error('razorpay_payment_id:', razorpay_payment_id ? 'Present' : 'Missing');
-                console.error('razorpay_signature:', razorpay_signature ? 'Present' : 'Missing');
-                
+            if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
+                console.error('[PAYMENT] Missing verification parameters');
                 return res.status(400).json({
                     success: false,
                     stage: 'Validation',
@@ -108,26 +69,12 @@ class PaymentController {
                 });
             }
 
-            if (!uid) {
-                console.error('PAYMENT ERROR: User UID not found in JWT token');
-                return res.status(401).json({
-                    success: false,
-                    stage: 'Authentication',
-                    message: 'User not authenticated'
-                });
-            }
+            console.log(`[PAYMENT] Verifying signature | Order: ${razorpayOrderId} | Payment: ${razorpayPaymentId}`);
 
-            console.log('PAYMENT: Verifying signature for Order:', razorpay_order_id, '| Payment:', razorpay_payment_id);
-
-            // Verify Signature
-            const isValid = PaymentService.verifySignature(razorpay_order_id, razorpay_payment_id, razorpay_signature);
+            const isValid = PaymentService.verifySignature(razorpayOrderId, razorpayPaymentId, razorpaySignature);
 
             if (!isValid) {
-                console.error('PAYMENT ERROR: Invalid Payment Signature');
-                console.error('Order ID:', razorpay_order_id);
-                console.error('Payment ID:', razorpay_payment_id);
-                console.error('Signature:', razorpay_signature);
-                
+                console.error('[PAYMENT] Invalid Payment Signature');
                 return res.status(400).json({
                     success: false,
                     stage: 'Signature Verification',
@@ -135,76 +82,88 @@ class PaymentController {
                 });
             }
 
-            console.log('PAYMENT: Signature Verified Successfully | UID:', uid);
+            console.log(`[PAYMENT] Signature Verified | Activating plan: ${planId}`);
 
-            // 1. Save payment record to Firestore
-            console.log('PAYMENT: Saving payment record to Firestore...');
-            const paymentRef = db.collection('payments').doc(razorpay_payment_id);
-            await paymentRef.set({
-                orderId: razorpay_order_id,
-                paymentId: razorpay_payment_id,
+            // 1. Determine plan details
+            let durationDays = 30;
+            let maxJobPosts = 5;
+            let planName = 'Premium';
+
+            // Recruiter Plans
+            if (planId.includes('monthly')) { planName = 'Monthly Plan'; durationDays = 30; maxJobPosts = 10; }
+            else if (planId.includes('quarterly')) { planName = 'Quarterly Plan'; durationDays = 90; maxJobPosts = 40; }
+            else if (planId.includes('yearly')) { planName = 'Yearly Plan'; durationDays = 365; maxJobPosts = 200; }
+            // Job Seeker Plans
+            else if (planId === 'silver') { planName = 'Silver Plan'; durationDays = 30; maxJobPosts = 0; }
+            else if (planId === 'gold') { planName = 'Gold Plan'; durationDays = 90; maxJobPosts = 0; }
+            else if (planId === 'platinum') { planName = 'Platinum Plan'; durationDays = 365; maxJobPosts = 0; }
+
+            const expiry = new Date();
+            expiry.setDate(expiry.getDate() + durationDays);
+
+            // 2. Save payment record
+            await db.collection('payments').doc(razorpayPaymentId).set({
+                orderId: razorpayOrderId,
+                paymentId: razorpayPaymentId,
                 userId: uid,
-                planId: planId || 'premium_monthly',
+                planId: planId,
                 status: 'verified',
                 gateway: 'razorpay',
                 timestamp: new Date().toISOString()
             });
-            console.log('PAYMENT: Payment record saved');
 
-            // 2. Calculate Expiry (30 days from now)
-            const expiry = new Date();
-            expiry.setDate(expiry.getDate() + 30);
-
-            const subscriptionData = {
+            // 3. Update User Subscriptions in Firestore
+            const subData = {
                 userId: uid,
-                planId: planId || 'premium_monthly',
+                planId: planId,
+                planName: planName,
                 status: 'ACTIVE',
-                remainingJobs: 5, // Default for premium_monthly if not specified
+                maxJobPosts: maxJobPosts,
+                remainingJobPosts: maxJobPosts,
                 startDate: new Date().toISOString(),
                 expiryDate: expiry.toISOString(),
                 isActive: true,
                 updatedAt: new Date().toISOString()
             };
 
-            console.log('PAYMENT: Subscription Data:', JSON.stringify(subscriptionData));
-
-            // 3. Update Firestore (Atomic Write)
-            console.log('PAYMENT: Updating Firestore subscriptions...');
             const batch = db.batch();
-            batch.set(db.collection('subscriptions').doc(uid), subscriptionData);
-            batch.set(db.collection('jobSeekerSubscriptions').doc(uid), subscriptionData);
-            await batch.commit();
-            console.log('PAYMENT: Firestore updated successfully');
 
-            // 4. Update RTDB for instant UI refresh
-            console.log('PAYMENT: Updating RTDB for instant UI refresh...');
+            // Check if it's a recruiter plan or seeker plan based on ID
+            const isRecruiterPlan = !(['silver', 'gold', 'platinum'].includes(planId));
+
+            if (isRecruiterPlan) {
+                batch.set(db.collection('recruiterSubscriptions').doc(uid), subData);
+            } else {
+                batch.set(db.collection('jobSeekerSubscriptions').doc(uid), subData);
+            }
+
+            // Generic subscriptions collection for shared lookups
+            batch.set(db.collection('subscriptions').doc(uid), subData);
+
+            await batch.commit();
+            console.log('[PAYMENT] Firestore updated');
+
+            // 4. Update RTDB for instant refresh
             await rtdb.ref(`subscriptions/${uid}`).set({
                 isActive: true,
                 status: 'ACTIVE',
-                remainingJobs: 5,
+                planId: planId,
+                planName: planName,
+                maxJobPosts: maxJobPosts,
+                remainingJobs: maxJobPosts,
                 expiryDate: expiry.getTime(),
-                planId: planId || 'premium_monthly',
                 updatedAt: Date.now()
             });
-            console.log('PAYMENT: RTDB updated successfully');
-
-            console.log('=== PAYMENT: SUBSCRIPTION ACTIVATED SUCCESSFULLY ===');
-            console.log('UID:', uid);
-            console.log('Plan:', planId || 'premium_monthly');
-            console.log('Expiry:', expiry.toISOString());
+            console.log('[PAYMENT] RTDB updated');
 
             res.json({ 
                 success: true, 
                 message: 'Subscription activated successfully',
-                subscription: subscriptionData
+                subscription: subData
             });
             
         } catch (error) {
-            console.error('=== PAYMENT: VERIFICATION ERROR ===');
-            console.error('Error Stage: Fulfillment');
-            console.error('Error Message:', error.message);
-            console.error('Error Stack:', error.stack);
-            
+            console.error('[PAYMENT] Verification/Activation Error:', error.message);
             res.status(500).json({
                 success: false,
                 stage: 'Fulfillment',
