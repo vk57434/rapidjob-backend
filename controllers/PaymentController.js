@@ -158,6 +158,8 @@ class PaymentController {
             const subscriptionData = {
                 userId: uid,
                 planId: planId || 'premium_monthly',
+                status: 'ACTIVE',
+                remainingJobs: 5, // Default for premium_monthly if not specified
                 startDate: new Date().toISOString(),
                 expiryDate: expiry.toISOString(),
                 isActive: true,
@@ -178,6 +180,8 @@ class PaymentController {
             console.log('PAYMENT: Updating RTDB for instant UI refresh...');
             await rtdb.ref(`subscriptions/${uid}`).set({
                 isActive: true,
+                status: 'ACTIVE',
+                remainingJobs: 5,
                 expiryDate: expiry.getTime(),
                 planId: planId || 'premium_monthly',
                 updatedAt: Date.now()
