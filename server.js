@@ -33,6 +33,7 @@ const notificationRoutes = require('./routes/notification.routes');
 const subscriptionRoutes = require('./routes/subscription.routes');
 const companyRoutes = require('./routes/company.routes');
 const userRoutes = require('./routes/user.routes');
+const emailRoutes = require('./routes/email.routes');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/jobs', jobRoutes);
@@ -43,6 +44,7 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
 app.use('/api/companies', companyRoutes);
 app.use('/api', userRoutes); // /api/profile
+app.use('/api/email', emailRoutes);
 
 app.get('/', (req, res) => {
     res.send('RapidJob Backend API is running...');
