@@ -1,4 +1,4 @@
-const { auth } = require('../config/firebaseAdmin');
+const { auth, db } = require('../config/firebaseAdmin');
 
 /**
  * Middleware to verify Firebase ID Token using Firebase Admin SDK.
@@ -30,21 +30,29 @@ const verifyToken = async (req, res, next) => {
         });
     }
 
-    console.log('[BACKEND AUTH] Token Extracted (length):', idToken.length);
-
     try {
-        // Requirement: Verify Firebase ID Token using Admin SDK
         console.log('[BACKEND AUTH] Firebase Token Verification started...');
         const decodedToken = await auth.verifyIdToken(idToken);
 
-        console.log('[BACKEND AUTH] Decoded UID:', decodedToken.uid);
-        console.log('[BACKEND AUTH] Decoded Email:', decodedToken.email);
+        // Fetch user from Firestore to get their latest role
+        const userDoc = await db.collection('users').doc(decodedToken.uid).get();
+        if (!userDoc.exists) {
+            console.error('[BACKEND AUTH] User record missing in Firestore for UID:', decodedToken.uid);
+            return res.status(403).json({
+                success: false,
+                message: 'User record not found. Access denied.'
+            });
+        }
+
+        const userData = userDoc.data();
+        console.log('[BACKEND AUTH] Decoded UID:', decodedToken.uid, '| Role:', userData.role);
 
         // Attach user info to request object
         req.user = {
             uid: decodedToken.uid,
             email: decodedToken.email,
-            name: decodedToken.name || decodedToken.email?.split('@')[0],
+            name: userData.fullName || decodedToken.name || decodedToken.email?.split('@')[0],
+            role: userData.role || 'JOB_SEEKER',
             auth_provider: decodedToken.firebase.sign_in_provider
         };
 
@@ -68,4 +76,21 @@ const verifyToken = async (req, res, next) => {
     }
 };
 
-module.exports = { verifyToken };
+/**
+ * Middleware to restrict access to ADMIN only.
+ * Must be used after verifyToken.
+ */
+const isAdmin = (req, res, next) => {
+    if (req.user && req.user.role === 'ADMIN') {
+        console.log('[BACKEND AUTH] Admin access granted for UID:', req.user.uid);
+        next();
+    } else {
+        console.warn('[BACKEND AUTH] Unauthorized admin access attempt by UID:', req.user?.uid, '| Role:', req.user?.role);
+        res.status(403).json({
+            success: false,
+            message: 'Admin access required. You do not have permission to perform this action.'
+        });
+    }
+};
+
+module.exports = { verifyToken, isAdmin };

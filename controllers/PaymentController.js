@@ -94,9 +94,9 @@ class PaymentController {
             else if (planId.includes('quarterly')) { planName = 'Quarterly Plan'; durationDays = 90; maxJobPosts = 40; }
             else if (planId.includes('yearly')) { planName = 'Yearly Plan'; durationDays = 365; maxJobPosts = 200; }
             // Job Seeker Plans
-            else if (planId === 'silver') { planName = 'Silver Plan'; durationDays = 30; maxJobPosts = 0; }
-            else if (planId === 'gold') { planName = 'Gold Plan'; durationDays = 90; maxJobPosts = 0; }
-            else if (planId === 'platinum') { planName = 'Platinum Plan'; durationDays = 365; maxJobPosts = 0; }
+            else if (planId === 'silver') { planName = 'Silver Weekly'; durationDays = 7; maxJobPosts = 0; }
+            else if (planId === 'gold') { planName = 'Gold Monthly'; durationDays = 30; maxJobPosts = 0; }
+            else if (planId === 'platinum') { planName = 'Platinum Quarterly'; durationDays = 90; maxJobPosts = 0; }
 
             const expiry = new Date();
             expiry.setDate(expiry.getDate() + durationDays);
