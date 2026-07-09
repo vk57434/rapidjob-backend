@@ -1,5 +1,5 @@
 const PaymentService = require('../services/PaymentService');
-const { db, rtdb } = require('../config/firebaseAdmin');
+const { db, rtdb, admin } = require('../config/firebaseAdmin');
 
 class PaymentController {
     /**
@@ -118,12 +118,13 @@ class PaymentController {
                 planId: planId,
                 planName: planName,
                 status: 'ACTIVE',
-                maxJobPosts: maxJobPosts,
-                remainingJobPosts: maxJobPosts,
+                jobsLimit: maxJobPosts,
+                remainingJobs: maxJobPosts,
+                active: true,
                 startDate: new Date().toISOString(),
-                expiryDate: expiry.toISOString(),
-                isActive: true,
-                updatedAt: new Date().toISOString()
+                expiryDate: expiry.getTime(), // Changed to number for consistency with Android
+                expiryAt: admin.firestore.Timestamp.fromDate(expiry), // Added for security rules
+                updatedAt: admin.firestore.Timestamp.now()
             };
 
             const batch = db.batch();
@@ -132,24 +133,21 @@ class PaymentController {
             const isRecruiterPlan = !(['silver', 'gold', 'platinum'].includes(planId));
 
             if (isRecruiterPlan) {
-                batch.set(db.collection('recruiterSubscriptions').doc(uid), subData);
+                batch.set(db.collection('subscriptions').doc(uid), subData); // Recruiter sub is in 'subscriptions'
             } else {
                 batch.set(db.collection('jobSeekerSubscriptions').doc(uid), subData);
             }
-
-            // Generic subscriptions collection for shared lookups
-            batch.set(db.collection('subscriptions').doc(uid), subData);
 
             await batch.commit();
             console.log('[PAYMENT] Firestore updated');
 
             // 4. Update RTDB for instant refresh
             await rtdb.ref(`subscriptions/${uid}`).set({
-                isActive: true,
+                active: true,
                 status: 'ACTIVE',
                 planId: planId,
                 planName: planName,
-                maxJobPosts: maxJobPosts,
+                jobsLimit: maxJobPosts,
                 remainingJobs: maxJobPosts,
                 expiryDate: expiry.getTime(),
                 updatedAt: Date.now()

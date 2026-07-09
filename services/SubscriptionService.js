@@ -1,4 +1,4 @@
-const { db } = require('../config/firebaseAdmin');
+const { db, admin } = require('../config/firebaseAdmin');
 
 class SubscriptionService {
     async getUserSubscription(userId) {
@@ -14,8 +14,10 @@ class SubscriptionService {
             planId,
             userId,
             startDate: new Date().toISOString(),
-            expiryDate: expiryDate.toISOString(),
-            status: 'active'
+            expiryDate: expiryDate.getTime(),
+            expiryAt: admin.firestore.Timestamp.fromDate(expiryDate),
+            status: 'active',
+            updatedAt: admin.firestore.Timestamp.now()
         };
 
         await db.collection('subscriptions').doc(userId).set(subscriptionData, { merge: true });
