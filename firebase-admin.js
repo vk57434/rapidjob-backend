@@ -22,8 +22,8 @@ if (!admin.apps.length) {
         } else {
             console.error("❌ Firebase Admin: serviceAccountKey.json NOT FOUND at", serviceAccountPath);
             // Fallback to environment variables if available
-            if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-                const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
+            if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+                const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
                 admin.initializeApp({
                     credential: admin.credential.cert(serviceAccount)
                 });
