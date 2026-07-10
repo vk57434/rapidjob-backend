@@ -2,39 +2,51 @@ const admin = require("firebase-admin");
 const path = require("path");
 const fs = require("fs");
 
-/**
- * FIREBASE ADMIN INITIALIZATION
- * Read credentials from serviceAccountKey.json
- */
-
 const serviceAccountPath = path.join(__dirname, "serviceAccountKey.json");
 
 if (!admin.apps.length) {
     try {
-        if (fs.existsSync(serviceAccountPath)) {
-            const serviceAccount = require(serviceAccountPath);
-            admin.initializeApp({
-                credential: admin.credential.cert(serviceAccount),
-                databaseURL: process.env.FIREBASE_DATABASE_URL || "https://rapidjob-f6a1f-default-rtdb.firebaseio.com",
-                storageBucket: process.env.FIREBASE_STORAGE_BUCKET || "rapidjob-f6a1f.firebasestorage.app"
-            });
-            console.log("✅ Firebase Admin: Initialized with serviceAccountKey.json");
+
+        let serviceAccount;
+
+        if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+
+            console.log("Using Firebase credentials from Render Environment");
+
+            serviceAccount = JSON.parse(
+                process.env.FIREBASE_SERVICE_ACCOUNT
+            );
+
+        } else if (fs.existsSync(serviceAccountPath)) {
+
+            console.log("Using local serviceAccountKey.json");
+
+            serviceAccount = require(serviceAccountPath);
+
         } else {
-            console.error("❌ Firebase Admin: serviceAccountKey.json NOT FOUND at", serviceAccountPath);
-            // Fallback to environment variables if available
-            if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-                const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-                admin.initializeApp({
-                    credential: admin.credential.cert(serviceAccount)
-                });
-                console.log("✅ Firebase Admin: Initialized with environment variable");
-            } else {
-                throw new Error("Missing Firebase Admin credentials!");
-            }
+
+            throw new Error("Firebase Admin credentials not found.");
+
         }
-    } catch (error) {
-        console.error("❌ Firebase Admin: Initialization failed:", error.message);
+
+        admin.initializeApp({
+            credential: admin.credential.cert(serviceAccount),
+            databaseURL:
+                process.env.FIREBASE_DATABASE_URL ||
+                "https://rapidjob-f6a1f-default-rtdb.firebaseio.com",
+            storageBucket:
+                process.env.FIREBASE_STORAGE_BUCKET ||
+                "rapidjob-f6a1f.firebasestorage.app"
+        });
+
+        console.log("Firebase Admin initialized successfully.");
+
+    } catch (err) {
+
+        console.error(err);
+
         process.exit(1);
+
     }
 }
 
