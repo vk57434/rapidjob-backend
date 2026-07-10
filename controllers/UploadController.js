@@ -1,5 +1,5 @@
 const CloudinaryService = require('../services/CloudinaryService');
-const { db } = require('../config/firebaseAdmin');
+const { db } = require('../firebase-admin');
 const fs = require('fs');
 
 class UploadController {

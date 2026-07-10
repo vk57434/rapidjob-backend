@@ -1,4 +1,4 @@
-const { auth, db } = require('../config/firebaseAdmin');
+const { auth, db } = require('../firebase-admin');
 
 /**
  * Middleware to verify Firebase ID Token using Firebase Admin SDK.

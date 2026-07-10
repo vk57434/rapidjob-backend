@@ -7,6 +7,7 @@ node_modules/
 
 # Firebase Admin Keys
 firebase-admin.json
+serviceAccountKey.json
 rapidjob-f6a1f-*.json
 
 # Logs

@@ -12,7 +12,7 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Config
-require('./config/firebaseAdmin');
+require('./firebase-admin');
 
 // Standard Middlewares
 app.use(helmet());

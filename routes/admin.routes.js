@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { verifyToken, isAdmin } = require('../middlewares/auth');
-const { db } = require('../config/firebaseAdmin');
+const { db } = require('../firebase-admin');
 
 /**
  * ADMIN ONLY ROUTES

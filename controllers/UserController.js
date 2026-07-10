@@ -1,4 +1,4 @@
-const { db } = require('../config/firebaseAdmin');
+const { db } = require('../firebase-admin');
 
 class UserController {
     async getProfile(req, res) {

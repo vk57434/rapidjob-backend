@@ -1,4 +1,4 @@
-const { db } = require('../config/firebaseAdmin');
+const { db } = require('../firebase-admin');
 
 class NotificationService {
     async sendNotification(userId, title, message, data = {}) {

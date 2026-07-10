@@ -1,4 +1,4 @@
-const { auth, db } = require('../config/firebaseAdmin');
+const { auth, db } = require('../firebase-admin');
 const jwt = require('jsonwebtoken');
 
 class AuthController {

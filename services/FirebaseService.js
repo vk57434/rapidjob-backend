@@ -1,4 +1,4 @@
-const { db, rtdb, auth } = require('../config/firebaseAdmin');
+const { db, rtdb, auth } = require('../firebase-admin');
 
 class FirebaseService {
     async verifyToken(token) {

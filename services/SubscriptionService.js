@@ -1,4 +1,4 @@
-const { db, admin } = require('../config/firebaseAdmin');
+const { db, admin } = require('../firebase-admin');
 
 class SubscriptionService {
     async getUserSubscription(userId) {

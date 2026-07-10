@@ -1,5 +1,5 @@
 const PaymentService = require('../services/PaymentService');
-const { db, rtdb, admin } = require('../config/firebaseAdmin');
+const { db, rtdb, admin } = require('../firebase-admin');
 
 class PaymentController {
     /**
