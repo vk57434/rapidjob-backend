@@ -1,172 +1,100 @@
 const PaymentService = require('../services/PaymentService');
-const { db, rtdb, admin } = require('../firebase-admin');
 
 class PaymentController {
-    /**
-     * POST /api/payment/create-order
-     * Creates a Razorpay Order and returns order_id to Android.
-     */
     async createOrder(req, res) {
         const uid = req.user.uid;
-        console.log(`[PAYMENT] createOrder | UID: ${uid} | User: ${req.user.email}`);
-        
         try {
             const { amount, currency, planId } = req.body;
 
             if (!amount || !planId) {
-                console.error('[PAYMENT] Validation Error: amount or planId missing');
-                return res.status(400).json({
-                    success: false,
-                    stage: 'Validation',
-                    message: 'Amount and Plan ID are required'
-                });
+                return res.status(400).json({ success: false, message: '400 Invalid Request' });
             }
 
-            console.log(`[PAYMENT] Creating order | Amount: ${amount} | Currency: ${currency || 'INR'} | Plan: ${planId}`);
-
             const receipt = `rcpt_${uid.substring(0, 8)}_${Date.now()}`;
-            const order = await PaymentService.createOrder(parseInt(amount), currency || 'INR', receipt, planId);
+            const order = await PaymentService.createOrder(amount, currency || 'INR', receipt, planId);
             
-            const response = {
+            res.json({
                 success: true,
                 orderId: order.id,
                 amount: order.amount,
                 currency: order.currency,
-                keyId: process.env.RAZORPAY_KEY_ID,
-                receipt: order.receipt
-            };
-
-            console.log('[PAYMENT] Order Created Successfully:', order.id);
-            res.json(response);
-            
-        } catch (error) {
-            console.error('[PAYMENT] Order Creation Error:', error.message);
-            res.status(500).json({
-                success: false,
-                stage: 'Razorpay API',
-                message: error.message || 'Failed to create order'
+                keyId: process.env.RAZORPAY_KEY_ID
             });
+        } catch (error) {
+            console.error('FAILED: createOrder', error.message);
+            res.status(500).json({ success: false, message: '500 Internal Error' });
         }
     }
 
-    /**
-     * POST /api/payment/verify
-     * Verifies payment signature and activates subscription.
-     */
     async verify(req, res) {
         const uid = req.user.uid;
-        console.log(`[PAYMENT] verify | UID: ${uid} | User: ${req.user.email}`);
+        console.log('PAYMENT START');
         
         try {
             const { razorpayOrderId, razorpayPaymentId, razorpaySignature, planId } = req.body;
 
-            if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
-                console.error('[PAYMENT] Missing verification parameters');
-                return res.status(400).json({
-                    success: false,
-                    stage: 'Validation',
-                    message: 'Missing verification parameters'
-                });
+            if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature || !planId) {
+                return res.status(400).json({ success: false, message: '400 Invalid Request' });
             }
 
-            console.log(`[PAYMENT] Verifying signature | Order: ${razorpayOrderId} | Payment: ${razorpayPaymentId}`);
-
+            // 1. Signature Verification
             const isValid = PaymentService.verifySignature(razorpayOrderId, razorpayPaymentId, razorpaySignature);
-
             if (!isValid) {
-                console.error('[PAYMENT] Invalid Payment Signature');
-                return res.status(400).json({
-                    success: false,
-                    stage: 'Signature Verification',
-                    message: 'Invalid signature'
-                });
+                console.error('FAILED: Invalid Signature');
+                return res.status(403).json({ success: false, message: '403 Invalid Signature' });
+            }
+            console.log('SIGNATURE VERIFIED');
+
+            // 2. Prevent Replay Attacks (Check if payment was already processed)
+            const alreadyProcessed = await PaymentService.isPaymentAlreadyUsed(razorpayPaymentId);
+            if (alreadyProcessed) {
+                console.error('FAILED: Payment already processed');
+                return res.status(409).json({ success: false, message: '409 Payment already processed' });
             }
 
-            console.log(`[PAYMENT] Signature Verified | Activating plan: ${planId}`);
+            // 3. Verify Payment Status with Razorpay API
+            const paymentDetails = await PaymentService.getPaymentDetails(razorpayPaymentId);
+            if (paymentDetails.status !== 'captured' && paymentDetails.status !== 'authorized') {
+                console.error('FAILED: Payment not captured');
+                return res.status(400).json({ success: false, message: '400 Payment not captured' });
+            }
+            console.log('PAYMENT VERIFIED');
 
-            // 1. Determine plan details
-            let durationDays = 30;
-            let maxJobPosts = 5;
-            let planName = 'Premium';
-
-            // Recruiter Plans
-            if (planId.includes('monthly')) { planName = 'Monthly Plan'; durationDays = 30; maxJobPosts = 10; }
-            else if (planId.includes('quarterly')) { planName = 'Quarterly Plan'; durationDays = 90; maxJobPosts = 40; }
-            else if (planId.includes('yearly')) { planName = 'Yearly Plan'; durationDays = 365; maxJobPosts = 200; }
-            // Job Seeker Plans
-            else if (planId === 'silver') { planName = 'Silver Weekly'; durationDays = 7; maxJobPosts = 0; }
-            else if (planId === 'gold') { planName = 'Gold Monthly'; durationDays = 30; maxJobPosts = 0; }
-            else if (planId === 'platinum') { planName = 'Platinum Quarterly'; durationDays = 90; maxJobPosts = 0; }
-
-            const expiry = new Date();
-            expiry.setDate(expiry.getDate() + durationDays);
-
-            // 2. Save payment record
-            await db.collection('payments').doc(razorpayPaymentId).set({
-                orderId: razorpayOrderId,
-                paymentId: razorpayPaymentId,
-                userId: uid,
-                planId: planId,
-                status: 'verified',
-                gateway: 'razorpay',
-                timestamp: new Date().toISOString()
-            });
-
-            // 3. Update User Subscriptions in Firestore
-            const subData = {
-                userId: uid,
-                planId: planId,
-                planName: planName,
-                status: 'ACTIVE',
-                jobsLimit: maxJobPosts,
-                remainingJobs: maxJobPosts,
-                active: true,
-                startDate: new Date().toISOString(),
-                expiryDate: expiry.getTime(), // Changed to number for consistency with Android
-                expiryAt: admin.firestore.Timestamp.fromDate(expiry), // Added for security rules
-                updatedAt: admin.firestore.Timestamp.now()
-            };
-
-            const batch = db.batch();
-
-            // Check if it's a recruiter plan or seeker plan based on ID
-            const isRecruiterPlan = !(['silver', 'gold', 'platinum'].includes(planId));
-
-            if (isRecruiterPlan) {
-                batch.set(db.collection('subscriptions').doc(uid), subData); // Recruiter sub is in 'subscriptions'
-            } else {
-                batch.set(db.collection('jobSeekerSubscriptions').doc(uid), subData);
+            // 4. Load Plan Details
+            let planDetails;
+            try {
+                planDetails = PaymentService.getPlanDetails(planId);
+                console.log('PLAN LOADED');
+            } catch (e) {
+                console.error('FAILED: Plan Not Found');
+                return res.status(404).json({ success: false, message: '404 Plan Not Found' });
             }
 
-            await batch.commit();
-            console.log('[PAYMENT] Firestore updated');
+            // 5. Check for Existing Active Subscription
+            const activeSub = await PaymentService.getActiveSubscription(uid);
+            if (activeSub && activeSub.planId === planId) {
+                console.log('FAILED: Already Active');
+                return res.status(409).json({ success: false, message: '409 Already Active' });
+            }
 
-            // 4. Update RTDB for instant refresh
-            await rtdb.ref(`subscriptions/${uid}`).set({
-                active: true,
-                status: 'ACTIVE',
-                planId: planId,
-                planName: planName,
-                jobsLimit: maxJobPosts,
-                remainingJobs: maxJobPosts,
-                expiryDate: expiry.getTime(),
-                updatedAt: Date.now()
-            });
-            console.log('[PAYMENT] RTDB updated');
+            // 6. Activate Subscription (Update RTDB & History)
+            const subscription = await PaymentService.activateSubscription(
+                uid,
+                planId,
+                planDetails,
+                paymentDetails
+            );
 
-            res.json({ 
-                success: true, 
+            console.log('SUCCESS');
+            res.json({
+                success: true,
                 message: 'Subscription activated successfully',
-                subscription: subData
+                subscription
             });
-            
+
         } catch (error) {
-            console.error('[PAYMENT] Verification/Activation Error:', error.message);
-            res.status(500).json({
-                success: false,
-                stage: 'Fulfillment',
-                message: error.message || 'Failed to verify payment'
-            });
+            console.error('FAILED: verify', error.message);
+            res.status(500).json({ success: false, message: '500 Internal Error' });
         }
     }
 }
