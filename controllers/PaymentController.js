@@ -28,56 +28,53 @@ class PaymentController {
 
     async verify(req, res) {
         const uid = req.user.uid;
-        console.log('PAYMENT START');
+        console.log(`[PAYMENT_VERIFY_START] UID: ${uid}`);
         
         try {
             const { razorpayOrderId, razorpayPaymentId, razorpaySignature, planId } = req.body;
 
+            console.log(`[VERIFY_REQUEST] OrderId: ${razorpayOrderId}, PaymentId: ${razorpayPaymentId}, PlanId: ${planId}`);
+
             if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature || !planId) {
-                return res.status(400).json({ success: false, message: '400 Invalid Request' });
+                console.error('[VERIFY_FAILED] Missing required fields');
+                return res.status(400).json({ success: false, message: 'Missing payment details' });
             }
 
             // 1. Signature Verification
             const isValid = PaymentService.verifySignature(razorpayOrderId, razorpayPaymentId, razorpaySignature);
             if (!isValid) {
-                console.error('FAILED: Invalid Signature');
-                return res.status(403).json({ success: false, message: '403 Invalid Signature' });
+                console.error('[VERIFY_FAILED] Signature mismatch');
+                return res.status(403).json({ success: false, message: 'Invalid payment signature' });
             }
-            console.log('SIGNATURE VERIFIED');
+            console.log('[SIGNATURE_VERIFIED] OK');
 
             // 2. Prevent Replay Attacks (Check if payment was already processed)
             const alreadyProcessed = await PaymentService.isPaymentAlreadyUsed(razorpayPaymentId);
             if (alreadyProcessed) {
-                console.error('FAILED: Payment already processed');
-                return res.status(409).json({ success: false, message: '409 Payment already processed' });
+                console.error(`[VERIFY_FAILED] Payment ${razorpayPaymentId} already used`);
+                return res.status(409).json({ success: false, message: 'Payment already processed' });
             }
 
             // 3. Verify Payment Status with Razorpay API
             const paymentDetails = await PaymentService.getPaymentDetails(razorpayPaymentId);
+            console.log(`[PAYMENT_STATUS] Status: ${paymentDetails.status}`);
+
             if (paymentDetails.status !== 'captured' && paymentDetails.status !== 'authorized') {
-                console.error('FAILED: Payment not captured');
-                return res.status(400).json({ success: false, message: '400 Payment not captured' });
+                console.error(`[VERIFY_FAILED] Payment status: ${paymentDetails.status}`);
+                return res.status(400).json({ success: false, message: `Payment not successful (Status: ${paymentDetails.status})` });
             }
-            console.log('PAYMENT VERIFIED');
 
             // 4. Load Plan Details
             let planDetails;
             try {
                 planDetails = PaymentService.getPlanDetails(planId);
-                console.log('PLAN LOADED');
+                console.log(`[PLAN_LOADED] Name: ${planDetails.planName}, isRecruiter: ${planDetails.isRecruiter}`);
             } catch (e) {
-                console.error('FAILED: Plan Not Found');
-                return res.status(404).json({ success: false, message: '404 Plan Not Found' });
+                console.error(`[VERIFY_FAILED] Plan not found: ${planId}`);
+                return res.status(404).json({ success: false, message: 'Selected plan details not found' });
             }
 
-            // 5. Check for Existing Active Subscription
-            const activeSub = await PaymentService.getActiveSubscription(uid);
-            if (activeSub && activeSub.planId === planId) {
-                console.log('FAILED: Already Active');
-                return res.status(409).json({ success: false, message: '409 Already Active' });
-            }
-
-            // 6. Activate Subscription (Update RTDB & History)
+            // 5. Activate Subscription (Update RTDB, Firestore & History)
             const subscription = await PaymentService.activateSubscription(
                 uid,
                 planId,
@@ -85,7 +82,7 @@ class PaymentController {
                 paymentDetails
             );
 
-            console.log('SUCCESS');
+            console.log('[VERIFY_SUCCESS] Subscription activated');
             res.json({
                 success: true,
                 message: 'Subscription activated successfully',
@@ -93,8 +90,8 @@ class PaymentController {
             });
 
         } catch (error) {
-            console.error('FAILED: verify', error.message);
-            res.status(500).json({ success: false, message: '500 Internal Error' });
+            console.error('[VERIFY_CRITICAL_FAILURE]', error);
+            res.status(500).json({ success: false, message: error.message || 'Internal server error during verification' });
         }
     }
 }

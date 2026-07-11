@@ -28,18 +28,14 @@ class PaymentService {
     }
 
     verifySignature(orderId, paymentId, signature) {
+        console.log(`[SIGNATURE_CHECK] Order: ${orderId}, Payment: ${paymentId}`);
         const generatedSignature = crypto
             .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
             .update(`${orderId}|${paymentId}`)
             .digest('hex');
 
-        const isValid = generatedSignature === signature;
-        if (isValid) {
-            console.log('SIGNATURE VERIFIED');
-        } else {
-            console.error('FAILED: Invalid Signature');
-        }
-        return isValid;
+        console.log(`[SIGNATURE_COMPARE] Generated: ${generatedSignature.substring(0, 10)}..., Received: ${signature.substring(0, 10)}...`);
+        return generatedSignature === signature;
     }
 
     async getPaymentDetails(paymentId) {
@@ -53,18 +49,29 @@ class PaymentService {
     }
 
     getPlanDetails(planId) {
-        console.log('PLAN LOADED:', planId);
+        const id = planId.toLowerCase();
+        console.log(`[PLAN_LOOKUP] ID: ${id}`);
+
         // Recruiter Plans
-        if (planId.includes('monthly')) return { planName: 'Monthly Plan', durationDays: 30, maxJobPosts: 10, isRecruiter: true };
-        if (planId.includes('quarterly')) return { planName: 'Quarterly Plan', durationDays: 90, maxJobPosts: 40, isRecruiter: true };
-        if (planId.includes('yearly')) return { planName: 'Yearly Plan', durationDays: 365, maxJobPosts: 200, isRecruiter: true };
+        if (id.includes('monthly')) {
+            const jobs = id.includes('multiple') ? 5 : 1;
+            return {
+                planName: id.includes('multiple') ? 'Multiple Hire Monthly' : 'Single Hire Monthly',
+                durationDays: 30,
+                maxJobPosts: jobs,
+                isRecruiter: true
+            };
+        }
+        if (id.includes('quarterly')) return { planName: 'Recruiter Quarterly', durationDays: 90, maxJobPosts: 20, isRecruiter: true };
+        if (id.includes('yearly')) return { planName: 'Recruiter Yearly', durationDays: 365, maxJobPosts: 100, isRecruiter: true };
 
         // Job Seeker Plans
-        if (planId === 'silver') return { planName: 'Silver Weekly', durationDays: 7, maxJobPosts: 0, isRecruiter: false };
-        if (planId === 'gold') return { planName: 'Gold Monthly', durationDays: 30, maxJobPosts: 0, isRecruiter: false };
-        if (planId === 'platinum') return { planName: 'Platinum Quarterly', durationDays: 90, maxJobPosts: 0, isRecruiter: false };
+        if (id === 'silver' || id.includes('silver')) return { planName: 'Silver Weekly', durationDays: 7, maxJobPosts: 0, isRecruiter: false };
+        if (id === 'gold' || id.includes('gold')) return { planName: 'Gold Monthly', durationDays: 30, maxJobPosts: 0, isRecruiter: false };
+        if (id === 'platinum' || id.includes('platinum')) return { planName: 'Platinum Quarterly', durationDays: 90, maxJobPosts: 0, isRecruiter: false };
 
-        throw new Error('PLAN_NOT_FOUND');
+        console.error(`[PLAN_NOT_FOUND] No mapping for: ${id}`);
+        throw new Error(`Plan details not found for ID: ${planId}`);
     }
 
     async getActiveSubscription(uid) {
@@ -94,19 +101,36 @@ class PaymentService {
             purchaseDate: now,
             updatedAt: now,
             paymentId: paymentDetails.id,
-            paymentGateway: 'razorpay'
+            paymentGateway: 'razorpay',
+            active: true
         };
 
-        // Update RTDB - Single Source of Truth
+        // 1. Update RTDB - Source of Truth
         await rtdb.ref(`subscriptions/${uid}`).set(subData);
-        console.log('SUBSCRIPTION UPDATED');
+        console.log('[RTDB_UPDATED] OK');
 
-        // Save Payment History in Firestore
+        // 2. Update Firestore Subscription Copy (Used by UI and Security Rules)
+        const firestoreSubData = {
+            userId: uid,
+            planId: planId,
+            planName: planDetails.planName,
+            status: 'ACTIVE',
+            remainingJobs: planDetails.maxJobPosts,
+            expiryAt: admin.firestore.Timestamp.fromMillis(expiry),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        };
+
+        const collection = planDetails.isRecruiter ? 'subscriptions' : 'jobSeekerSubscriptions';
+        await db.collection(collection).doc(uid).set(firestoreSubData, { merge: true });
+        console.log(`[FIRESTORE_UPDATED] Collection: ${collection}, UID: ${uid}`);
+
+        // 3. Save Payment History
         const paymentRecord = {
+            id: paymentDetails.id,
             paymentId: paymentDetails.id,
             orderId: paymentDetails.order_id,
             userId: uid,
-            amount: paymentDetails.amount / 100, // back to rupees
+            amount: paymentDetails.amount / 100,
             currency: paymentDetails.currency,
             planId,
             planName: planDetails.planName,
@@ -116,7 +140,7 @@ class PaymentService {
         };
 
         await db.collection('payments').doc(paymentDetails.id).set(paymentRecord);
-        console.log('PAYMENT SAVED');
+        console.log('[PAYMENT_HISTORY_SAVED] OK');
 
         return subData;
     }
