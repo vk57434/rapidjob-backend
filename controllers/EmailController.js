@@ -100,6 +100,55 @@ class EmailController {
     }
 
     /**
+     * POST /api/email/job-post-admin
+     * Sends job post notification to admin
+     */
+    async sendJobPostAdminNotification(req, res) {
+        console.log('====== EmailController.sendJobPostAdminNotification ======');
+        try {
+            const {
+                recruiterId,
+                recruiterName,
+                jobTitle,
+                companyName,
+                jobId,
+                timestamp
+            } = req.body;
+
+            // Validate
+            if (!jobId || !jobTitle) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Missing required job info'
+                });
+            }
+
+            const result = await EmailService.sendJobPostAdminNotification({
+                recruiterId,
+                recruiterName,
+                jobTitle,
+                companyName,
+                jobId,
+                timestamp
+            });
+
+            res.status(200).json({
+                success: true,
+                message: 'Admin notification processed',
+                simulated: result.simulated || false
+            });
+
+        } catch (error) {
+            console.error('❌ EmailController.sendJobPostAdminNotification ERROR:', error.message);
+            res.status(200).json({
+                success: true,
+                message: 'Job posted, but admin notification failed',
+                error: error.message
+            });
+        }
+    }
+
+    /**
      * POST /api/email/welcome
      * Sends welcome email to new user (future use)
      */

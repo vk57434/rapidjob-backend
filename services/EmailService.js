@@ -391,6 +391,144 @@ class EmailService {
     }
 
     /**
+     * Send Job Post Notification to Admin
+     */
+    async sendJobPostAdminNotification(data) {
+        const {
+            recruiterId,
+            recruiterName,
+            jobTitle,
+            companyName,
+            jobId,
+            timestamp
+        } = data;
+
+        const adminEmail = process.env.ADMIN_EMAIL || 'max459010@gmail.com';
+        console.log('📧 EmailService: Sending job post notification to admin:', adminEmail);
+
+        let jobDetails = { jobTitle, companyName, jobId };
+        let recruiterDetails = { recruiterId, recruiterName };
+
+        // Fetch additional details from Firestore for a complete report
+        try {
+            const { db } = require('../firebase-admin');
+
+            // 1. Fetch Job Document
+            const jobDoc = await db.collection('jobs').doc(jobId).get();
+            if (jobDoc.exists) {
+                const jd = jobDoc.data();
+                jobDetails = {
+                    ...jobDetails,
+                    location: jd.location,
+                    salary: jd.salary,
+                    jobType: jd.jobType,
+                    experience: jd.experience,
+                    description: jd.description,
+                    postedDate: jd.postedTime || jd.postedDate || timestamp
+                };
+            }
+
+            // 2. Fetch Recruiter Document
+            const recruiterDoc = await db.collection('users').doc(recruiterId).get();
+            if (recruiterDoc.exists) {
+                const rd = recruiterDoc.data();
+                recruiterDetails = {
+                    ...recruiterDetails,
+                    email: rd.email,
+                    phone: rd.phone
+                };
+            }
+        } catch (dbError) {
+            console.warn('⚠️ EmailService: Database fetch failed, using partial info:', dbError.message);
+        }
+
+        const content = `
+            <p>A new job has been posted on RapidJob.</p>
+
+            <div class="details-card">
+                <h4>📋 Job Details</h4>
+                <div class="details-row">
+                    <span class="details-label">Job Title:</span>
+                    <span class="details-value">${jobDetails.jobTitle}</span>
+                </div>
+                <div class="details-row">
+                    <span class="details-label">Company:</span>
+                    <span class="details-value">${jobDetails.companyName}</span>
+                </div>
+                <div class="details-row">
+                    <span class="details-label">Location:</span>
+                    <span class="details-value">${jobDetails.location || 'Not specified'}</span>
+                </div>
+                <div class="details-row">
+                    <span class="details-label">Salary:</span>
+                    <span class="details-value">${jobDetails.salary || 'Not specified'}</span>
+                </div>
+                <div class="details-row">
+                    <span class="details-label">Job Type:</span>
+                    <span class="details-value">${jobDetails.jobType || 'Not specified'}</span>
+                </div>
+                <div class="details-row">
+                    <span class="details-label">Experience:</span>
+                    <span class="details-value">${jobDetails.experience || 'Not specified'}</span>
+                </div>
+                <div class="details-row">
+                    <span class="details-label">Job ID:</span>
+                    <span class="details-value"><code>${jobId}</code></span>
+                </div>
+                <div class="details-row">
+                    <span class="details-label">Posted On:</span>
+                    <span class="details-value">${jobDetails.postedDate || new Date().toLocaleString()}</span>
+                </div>
+            </div>
+
+            <div class="details-card">
+                <h4>👤 Recruiter Details</h4>
+                <div class="details-row">
+                    <span class="details-label">Name:</span>
+                    <span class="details-value">${recruiterDetails.recruiterName}</span>
+                </div>
+                <div class="details-row">
+                    <span class="details-label">Email:</span>
+                    <span class="details-value">${recruiterDetails.email || 'Not provided'}</span>
+                </div>
+                <div class="details-row">
+                    <span class="details-label">Phone:</span>
+                    <span class="details-value">${recruiterDetails.phone || 'Not provided'}</span>
+                </div>
+                <div class="details-row">
+                    <span class="details-label">Recruiter ID:</span>
+                    <span class="details-value"><code>${recruiterId}</code></span>
+                </div>
+            </div>
+
+            <div class="details-card">
+                <h4>📝 Job Description</h4>
+                <div class="content" style="white-space: pre-line; color: #555; font-size: 14px;">
+                    ${jobDetails.description || 'No description provided.'}
+                </div>
+            </div>
+
+            <p style="margin-top: 20px;">
+                You can review this job in the Admin Panel.
+            </p>
+        `;
+
+        const html = this.generateTemplate({
+            title: 'New Job Posted - RapidJob',
+            greeting: 'Hello Admin,',
+            content,
+            buttonText: 'Open Admin Panel',
+            buttonUrl: 'https://rapidjob.app/admin/jobs'
+        });
+
+        return await this.sendEmail({
+            to: adminEmail,
+            subject: 'New Job Posted - RapidJob',
+            html
+        });
+    }
+
+    /**
      * Send Welcome Email to New User (future use)
      */
     async sendWelcomeEmail(data) {

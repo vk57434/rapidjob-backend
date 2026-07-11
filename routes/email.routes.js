@@ -11,6 +11,9 @@ const { verifyToken } = require('../middlewares/auth');
 // Send job application notification to recruiter
 router.post('/job-application', verifyToken, EmailController.sendJobApplicationNotification);
 
+// Send job post notification to admin
+router.post('/job-post-admin', verifyToken, EmailController.sendJobPostAdminNotification);
+
 // Send welcome email (future use)
 router.post('/welcome', verifyToken, EmailController.sendWelcomeEmail);
 
