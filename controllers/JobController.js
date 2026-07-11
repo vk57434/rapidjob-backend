@@ -10,9 +10,45 @@ class JobController {
             jobData.recruiterUid = req.user.uid; // for compatibility
             console.log('Creating job with data:', JSON.stringify(jobData, null, 2));
 
-            const docRef = await db.collection('jobs').add(jobData);
-            console.log('Job created successfully with ID:', docRef.id);
-            res.status(201).json({ id: docRef.id, ...jobData });
+           const docRef = await db.collection('jobs').add(jobData);
+
+           console.log('Job created successfully with ID:', docRef.id);
+
+           try {
+
+               console.log("📧 Sending admin notification email...");
+
+               const emailResult = await emailService.sendJobPostAdminNotification({
+
+                   recruiterId: req.user.uid,
+
+                   recruiterName:
+                       jobData.recruiterName ||
+                       req.user.name ||
+                       "Recruiter",
+
+                   companyName: jobData.companyName,
+
+                   jobTitle: jobData.jobTitle,
+
+                   jobId: docRef.id,
+
+                   timestamp: Date.now()
+
+               });
+
+               console.log("📧 Email Result:", emailResult);
+
+           } catch (emailError) {
+
+               console.error("❌ Email Error:", emailError);
+
+           }
+
+           res.status(201).json({
+               id: docRef.id,
+               ...jobData
+           });
         } catch (error) {
             console.error('JobController.createJob ERROR:', error.message);
             console.error('Error stack:', error.stack);
