@@ -1,4 +1,5 @@
 const { db } = require('../firebase-admin');
+const emailService = require('../services/emailService');
 
 class JobController {
     async createJob(req, res) {
