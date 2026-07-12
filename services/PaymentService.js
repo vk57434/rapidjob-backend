@@ -48,30 +48,44 @@ class PaymentService {
         }
     }
 
-    getPlanDetails(planId) {
-        const id = planId.toLowerCase();
-        console.log(`[PLAN_LOOKUP] ID: ${id}`);
+    /**
+     * LOAD PLAN DETAILS FROM FIRESTORE (REPLACED HARDCODED LOGIC)
+     * Fetches the source of truth for subscription parameters directly from Firestore.
+     */
+    async getPlanDetails(planId) {
+        console.log(`[FIRESTORE_PLAN_LOOKUP_START] ID: ${planId}`);
+        const planPath = `plans/${planId}`;
 
-        // Recruiter Plans
-        if (id.includes('monthly')) {
-            const jobs = id.includes('multiple') ? 5 : 1;
+        try {
+            // Fetch Plan Document
+            const planDoc = await db.collection('plans').doc(planId).get();
+
+            console.log(`[FIRESTORE_PLAN_LOOKUP_RESULT] Path: ${planPath}, Exists: ${planDoc.exists}`);
+
+            if (!planDoc.exists) {
+                console.error(`[PLAN_NOT_FOUND] Firestore document missing at: ${planPath}`);
+                return null;
+            }
+
+            const data = planDoc.data();
+            console.log(`[PLAN_DATA_LOADED]`, JSON.stringify(data));
+
+            // Map Firestore data to service-compatible format
+            // category helps determine if it's a RECRUITER or JOB_SEEKER plan
+            const category = (data.category || '').toUpperCase();
+
             return {
-                planName: id.includes('multiple') ? 'Multiple Hire Monthly' : 'Single Hire Monthly',
-                durationDays: 30,
-                maxJobPosts: jobs,
-                isRecruiter: true
+                planName: data.name || 'Unknown Plan',
+                durationDays: parseInt(data.durationDays) || 30,
+                maxJobPosts: parseInt(data.maxJobPosts) || 0,
+                isRecruiter: category === 'RECRUITER' || category === 'DASHBOARD',
+                price: data.price,
+                gst: data.gst
             };
+        } catch (error) {
+            console.error(`[FIRESTORE_PLAN_ERROR] Error fetching ${planPath}:`, error.message);
+            throw error;
         }
-        if (id.includes('quarterly')) return { planName: 'Recruiter Quarterly', durationDays: 90, maxJobPosts: 20, isRecruiter: true };
-        if (id.includes('yearly')) return { planName: 'Recruiter Yearly', durationDays: 365, maxJobPosts: 100, isRecruiter: true };
-
-        // Job Seeker Plans
-        if (id === 'silver' || id.includes('silver')) return { planName: 'Silver Weekly', durationDays: 7, maxJobPosts: 0, isRecruiter: false };
-        if (id === 'gold' || id.includes('gold')) return { planName: 'Gold Monthly', durationDays: 30, maxJobPosts: 0, isRecruiter: false };
-        if (id === 'platinum' || id.includes('platinum')) return { planName: 'Platinum Quarterly', durationDays: 90, maxJobPosts: 0, isRecruiter: false };
-
-        console.error(`[PLAN_NOT_FOUND] No mapping for: ${id}`);
-        throw new Error(`Plan details not found for ID: ${planId}`);
     }
 
     async getActiveSubscription(uid) {

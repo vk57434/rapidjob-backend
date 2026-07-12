@@ -31,50 +31,59 @@ class PaymentController {
         console.log(`[PAYMENT_VERIFY_START] UID: ${uid}`);
         
         try {
+            // REQUEST VALIDATION
             const { razorpayOrderId, razorpayPaymentId, razorpaySignature, planId } = req.body;
 
-            console.log(`[VERIFY_REQUEST] OrderId: ${razorpayOrderId}, PaymentId: ${razorpayPaymentId}, PlanId: ${planId}`);
+            // Log parameters before processing
+            console.log('[VERIFY_PARAMS_RECEIVED]', {
+                planId,
+                paymentId: razorpayPaymentId,
+                orderId: razorpayOrderId,
+                signatureReceived: !!razorpaySignature
+            });
 
-            if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature || !planId) {
-                console.error('[VERIFY_FAILED] Missing required fields');
-                return res.status(400).json({ success: false, message: 'Missing payment details' });
-            }
+            if (!razorpayOrderId) return res.status(400).json({ success: false, message: 'Missing razorpayOrderId' });
+            if (!razorpayPaymentId) return res.status(400).json({ success: false, message: 'Missing razorpayPaymentId' });
+            if (!razorpaySignature) return res.status(400).json({ success: false, message: 'Missing razorpaySignature' });
+            if (!planId) return res.status(400).json({ success: false, message: 'Missing planId' });
 
-            // 1. Signature Verification
+            // 1. SIGNATURE VERIFICATION
             const isValid = PaymentService.verifySignature(razorpayOrderId, razorpayPaymentId, razorpaySignature);
             if (!isValid) {
-                console.error('[VERIFY_FAILED] Signature mismatch');
+                console.error('[VERIFY_FAILED] Signature mismatch for Order:', razorpayOrderId);
                 return res.status(403).json({ success: false, message: 'Invalid payment signature' });
             }
             console.log('[SIGNATURE_VERIFIED] OK');
 
-            // 2. Prevent Replay Attacks (Check if payment was already processed)
+            // 2. PREVENT DUPLICATE PROCESSING (REPLAY ATTACK PROTECTION)
             const alreadyProcessed = await PaymentService.isPaymentAlreadyUsed(razorpayPaymentId);
             if (alreadyProcessed) {
-                console.error(`[VERIFY_FAILED] Payment ${razorpayPaymentId} already used`);
-                return res.status(409).json({ success: false, message: 'Payment already processed' });
+                console.error(`[VERIFY_FAILED] Payment ${razorpayPaymentId} was already successfully processed`);
+                return res.status(409).json({ success: false, message: 'Payment already processed and subscription activated' });
             }
 
-            // 3. Verify Payment Status with Razorpay API
+            // 3. FETCH PAYMENT FROM RAZORPAY API
             const paymentDetails = await PaymentService.getPaymentDetails(razorpayPaymentId);
-            console.log(`[PAYMENT_STATUS] Status: ${paymentDetails.status}`);
+            console.log(`[RAZORPAY_API_FETCH] Status: ${paymentDetails.status}, Amount: ${paymentDetails.amount}`);
 
             if (paymentDetails.status !== 'captured' && paymentDetails.status !== 'authorized') {
-                console.error(`[VERIFY_FAILED] Payment status: ${paymentDetails.status}`);
+                console.error(`[VERIFY_FAILED] Payment status is ${paymentDetails.status}, expected captured/authorized`);
                 return res.status(400).json({ success: false, message: `Payment not successful (Status: ${paymentDetails.status})` });
             }
 
-            // 4. Load Plan Details
-            let planDetails;
-            try {
-                planDetails = PaymentService.getPlanDetails(planId);
-                console.log(`[PLAN_LOADED] Name: ${planDetails.planName}, isRecruiter: ${planDetails.isRecruiter}`);
-            } catch (e) {
-                console.error(`[VERIFY_FAILED] Plan not found: ${planId}`);
-                return res.status(404).json({ success: false, message: 'Selected plan details not found' });
+            // 4. LOAD PLAN DETAILS FROM FIRESTORE (DYNAMIC LOOKUP)
+            const planDetails = await PaymentService.getPlanDetails(planId);
+            if (!planDetails) {
+                console.error(`[VERIFY_FAILED] Plan document not found in Firestore for ID: ${planId}`);
+                return res.status(404).json({
+                    success: false,
+                    message: 'Plan document not found. Please contact support if payment was debited.'
+                });
             }
+            console.log(`[PLAN_LOADED] Name: ${planDetails.planName}, Category determines Recruiter: ${planDetails.isRecruiter}`);
 
-            // 5. Activate Subscription (Update RTDB, Firestore & History)
+            // 5. ACTIVATE SUBSCRIPTION (UPDATE RTDB, FIRESTORE & HISTORY)
+            // This is a complex operation that updates multiple data sources
             const subscription = await PaymentService.activateSubscription(
                 uid,
                 planId,
@@ -82,7 +91,7 @@ class PaymentController {
                 paymentDetails
             );
 
-            console.log('[VERIFY_SUCCESS] Subscription activated');
+            console.log('[VERIFY_SUCCESS] Subscription activated for UID:', uid);
             res.json({
                 success: true,
                 message: 'Subscription activated successfully',
@@ -90,8 +99,11 @@ class PaymentController {
             });
 
         } catch (error) {
-            console.error('[VERIFY_CRITICAL_FAILURE]', error);
-            res.status(500).json({ success: false, message: error.message || 'Internal server error during verification' });
+            console.error('[VERIFY_CRITICAL_FAILURE] Trace:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Internal server error during payment verification. Payment recorded for manual review.'
+            });
         }
     }
 }
