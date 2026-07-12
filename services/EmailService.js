@@ -23,25 +23,38 @@ class EmailService {
      */
     initializeTransporter() {
         try {
-            // Get email configuration from environment variables
+            const user = process.env.EMAIL_USER;
+            const pass = process.env.EMAIL_PASS;
+
+            if (!user || !pass) {
+                console.warn('⚠️ EmailService: EMAIL_USER or EMAIL_PASS not configured - emails will be logged instead');
+                this.transporter = null;
+                return;
+            }
+
+            // Gmail SMTP configuration with high timeouts to prevent Render connection timeouts
             const emailConfig = {
-                host: process.env.EMAIL_HOST || 'smtp.gmail.com',
-                port: parseInt(process.env.EMAIL_PORT) || 587,
-                secure: process.env.EMAIL_SECURE === 'true', // true for 465, false for other ports
+                service: 'gmail',
                 auth: {
-                    user: process.env.EMAIL_USER,
-                    pass: process.env.EMAIL_PASS
-                }
+                    user: user,
+                    pass: pass
+                },
+                connectionTimeout: 30000,
+                greetingTimeout: 30000,
+                socketTimeout: 30000
             };
 
-            // Only create transporter if we have credentials
-            if (emailConfig.auth.user && emailConfig.auth.pass) {
-                this.transporter = nodemailer.createTransport(emailConfig);
-                console.log('✅ EmailService initialized successfully');
-            } else {
-                console.warn('⚠️ EmailService: Email credentials not configured - emails will be logged instead');
-                this.transporter = null;
-            }
+            this.transporter = nodemailer.createTransport(emailConfig);
+
+            // Verify connection configuration
+            this.transporter.verify((error, success) => {
+                if (error) {
+                    console.error('❌ SMTP VERIFY FAILED:', error);
+                } else {
+                    console.log('✅ SMTP READY - Server is ready to take our messages');
+                }
+            });
+
         } catch (error) {
             console.error('❌ EmailService initialization failed:', error.message);
             this.transporter = null;
@@ -237,22 +250,30 @@ class EmailService {
                 text: text || this.htmlToText(html)
             };
 
-            const result = await this.transporter.sendMail(mailOptions);
-            console.log('✅ EmailService: Email sent successfully!');
-            console.log('Message ID:', result.messageId);
+            console.log("Connecting to Gmail SMTP...");
+            const info = await this.transporter.sendMail(mailOptions);
+
+            console.log('✅ EMAIL SENT');
+            console.log('Message ID:', info.messageId);
+            console.log('Info:', info);
 
             return {
                 success: true,
-                messageId: result.messageId,
+                messageId: info.messageId,
                 message: 'Email sent successfully'
             };
         } catch (error) {
-            console.error('❌ EmailService: Failed to send email:', error.message);
-            console.error('Error stack:', error.stack);
+            console.error('❌ EMAIL FAILED TO SEND');
+            console.error('Error Code:', error.code);
+            console.error('Error Command:', error.command);
+            console.error('Error Response:', error.response);
+            console.error('Error ResponseCode:', error.responseCode);
+            console.error('Full Error:', error);
 
             return {
                 success: false,
                 error: error.message,
+                code: error.code,
                 message: 'Failed to send email'
             };
         }
