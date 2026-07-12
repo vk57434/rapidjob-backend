@@ -20,22 +20,16 @@ class JobController {
                console.log("📧 Sending admin notification email...");
 
                const emailResult = await emailService.sendJobPostAdminNotification({
-
                    recruiterId: req.user.uid,
-
                    recruiterName:
                        jobData.recruiterName ||
                        req.user.name ||
                        "Recruiter",
-
                    companyName: jobData.companyName,
-
                    jobTitle: jobData.jobTitle,
-
                    jobId: docRef.id,
-
+                   jobData: jobData,
                    timestamp: Date.now()
-
                });
 
                console.log("📧 Email Result:", emailResult);

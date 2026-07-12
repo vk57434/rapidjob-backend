@@ -255,23 +255,38 @@ class EmailService {
     }
 
     async sendJobPostAdminNotification(data) {
-        const { recruiterName, jobTitle, companyName, jobId } = data;
+        const { recruiterName, jobTitle, companyName, jobId, jobData = {} } = data;
 
-        let description = 'No description provided.';
-        try {
-            const jobDoc = await db.collection('jobs').doc(jobId).get();
-            if (jobDoc.exists) {
-                description = jobDoc.data().description || description;
-            }
-        } catch (e) { console.warn('DB Fetch failed:', e.message); }
+        const description = jobData.description || 'No description provided.';
+        const location = jobData.location || 'Not specified';
+        const salary = jobData.salary || 'Not specified';
+        const jobType = jobData.jobType || 'Not specified';
 
         const content = `
             <p>A new job has been posted by <b>${recruiterName}</b> at <b>${companyName}</b>.</p>
             <div class="details-card">
-                <h4>Job Details</h4>
-                <p><b>Title:</b> ${jobTitle}</p>
-                <p><b>ID:</b> ${jobId}</p>
-                <p><b>Description:</b> ${description.substring(0, 200)}...</p>
+                <h4>📋 Job Details</h4>
+                <div class="details-row">
+                    <span class="details-label">Title:</span>
+                    <span class="details-value">${jobTitle}</span>
+                </div>
+                <div class="details-row">
+                    <span class="details-label">Location:</span>
+                    <span class="details-value">${location}</span>
+                </div>
+                <div class="details-row">
+                    <span class="details-label">Salary:</span>
+                    <span class="details-value">${salary}</span>
+                </div>
+                <div class="details-row">
+                    <span class="details-label">Type:</span>
+                    <span class="details-value">${jobType}</span>
+                </div>
+                <div class="divider"></div>
+                <p><b>Description:</b></p>
+                <p style="font-size: 14px; color: #666; margin-top: 5px;">
+                    ${description.length > 300 ? description.substring(0, 300) + '...' : description}
+                </p>
             </div>
         `;
 
