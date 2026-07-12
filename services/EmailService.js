@@ -20,19 +20,21 @@ class EmailService {
         }
 
         this.transporter = nodemailer.createTransport({
-            host: EMAIL_HOST,
-            port: Number(EMAIL_PORT),
-            secure: EMAIL_SECURE === "true",
+            host: process.env.EMAIL_HOST,
+            port: Number(process.env.EMAIL_PORT),
+            secure: process.env.EMAIL_SECURE === "true",
+
             auth: {
-                user: EMAIL_USER,
-                pass: EMAIL_PASS
+                user: process.env.EMAIL_USER,
+                pass: process.env.EMAIL_PASS
             },
-            // Render specific: Force IPv4 and very long timeouts
+
             family: 4,
-            connectionTimeout: 120000, // 2 minutes
+            connectionTimeout: 120000,
             greetingTimeout: 120000,
             socketTimeout: 120000,
             dnsTimeout: 60000,
+
             logger: true,
             debug: true
         });
