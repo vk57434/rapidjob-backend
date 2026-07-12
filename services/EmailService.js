@@ -32,25 +32,28 @@ class EmailService {
                 return;
             }
 
-            // Gmail SMTP configuration with high timeouts to prevent Render connection timeouts
+            // Simplified configuration for high reliability on cloud platforms
             const emailConfig = {
-                host: process.env.EMAIL_HOST || 'smtp.gmail.com',
-                port: parseInt(process.env.EMAIL_PORT) || 465,
-                secure: process.env.EMAIL_SECURE === 'true' || (process.env.EMAIL_PORT === '465') || true,
+                host: 'smtp.gmail.com',
+                port: 465,
+                secure: true,
                 auth: {
                     user: user,
                     pass: pass
                 },
+                // Force IPv4 to avoid Render/Gmail IPv6 issues
+                family: 4,
                 tls: {
-                    // Do not fail on invalid certs
-                    rejectUnauthorized: false
+                    rejectUnauthorized: false,
+                    // Use common ciphers for better compatibility
+                    ciphers: 'SSLv3'
                 },
-                connectionTimeout: 60000, // Increased to 60s for Render
+                connectionTimeout: 60000,
                 greetingTimeout: 60000,
                 socketTimeout: 60000,
-                pool: true, // Use connection pooling
-                maxConnections: 5,
-                maxMessages: 100
+                // Enable debugging in Render logs
+                debug: true,
+                logger: true
             };
 
             this.transporter = nodemailer.createTransport(emailConfig);
