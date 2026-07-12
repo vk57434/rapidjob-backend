@@ -24,18 +24,25 @@ class EmailService {
                 return;
             }
 
-            // High reliability configuration for Render (Free Tier)
+            // Final "Most Compatible" configuration for Render Free Tier
+            // Switching to Port 587 (STARTTLS) as Port 465 is often blocked by Cloud Proxies.
             const emailConfig = {
-                service: 'gmail',
+                host: 'smtp.gmail.com',
+                port: 587,
+                secure: false, // Must be false for 587
+                requireTLS: true,
                 auth: {
                     user: user,
                     pass: pass
                 },
-                // Render specific: Force IPv4 and increase timeouts significantly
+                // Use a single connection instead of pooling to avoid "socket hang up" on Render
+                pool: false,
+                // Render specific: Force IPv4 and very long timeouts
                 family: 4,
-                connectionTimeout: 60000, // 1 minute
-                greetingTimeout: 60000,
-                socketTimeout: 60000,
+                connectionTimeout: 120000, // Increased to 2 minutes
+                greetingTimeout: 120000,
+                socketTimeout: 120000,
+                dnsTimeout: 60000,
                 debug: true,
                 logger: true
             };
