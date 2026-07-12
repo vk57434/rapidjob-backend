@@ -27,6 +27,12 @@ class EmailService {
                 user: EMAIL_USER,
                 pass: EMAIL_PASS
             },
+            // Render specific: Force IPv4 and very long timeouts
+            family: 4,
+            connectionTimeout: 120000, // 2 minutes
+            greetingTimeout: 120000,
+            socketTimeout: 120000,
+            dnsTimeout: 60000,
             logger: true,
             debug: true
         });
