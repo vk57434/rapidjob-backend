@@ -32,27 +32,22 @@ class EmailService {
                 return;
             }
 
-            // Robust configuration for high reliability on cloud platforms (Render/Heroku)
+            // Ultra-robust Gmail configuration for Render/Cloud Platforms
+            // Using the 'service' property is the most reliable way as nodemailer
+            // handles all the specific Gmail SMTP settings internally.
             const emailConfig = {
                 service: 'gmail',
                 auth: {
                     user: user,
                     pass: pass
                 },
-                // Use port 587 for better compatibility with cloud providers
-                port: 587,
-                secure: false, // true for 465, false for other ports
-                // Force IPv4 to avoid Render/Gmail IPv6 timeout issues
+                // Render specific: Force IPv4 and increase timeouts significantly
+                // to handle "spin down" or slow network resolution.
                 family: 4,
-                tls: {
-                    rejectUnauthorized: false,
-                    // Modern ciphers
-                    minVersion: 'TLSv1.2'
-                },
-                connectionTimeout: 30000,
-                greetingTimeout: 30000,
-                socketTimeout: 30000,
-                // Enable debugging in Render logs
+                connectionTimeout: 60000, // 60 seconds
+                greetingTimeout: 60000,
+                socketTimeout: 60000,
+                dnsTimeout: 30000,
                 debug: true,
                 logger: true
             };
