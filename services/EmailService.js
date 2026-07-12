@@ -13,51 +13,24 @@ class EmailService {
     /**
      * Initialize Nodemailer transporter using environment variables
      */
-    initializeTransporter() {
-        try {
-            const user = process.env.EMAIL_USER;
-            const pass = process.env.EMAIL_PASS;
+    const transporter = nodemailer.createTransport({
+        host: process.env.EMAIL_HOST,
+        port: Number(process.env.EMAIL_PORT),
+        secure: false,          // Port 587
+        requireTLS: true,
 
-            if (!user || !pass) {
-                console.warn('⚠️ EmailService: EMAIL_USER or EMAIL_PASS not configured - emails will be logged instead');
-                this.transporter = null;
-                return;
-            }
+        auth: {
+            user: process.env.EMAIL_USER,
+            pass: process.env.EMAIL_PASS
+        },
 
-            // Final "Most Compatible" configuration for Render Free Tier
-            // Switching to Port 587 (STARTTLS) as Port 465 is often blocked by Cloud Proxies.
-            const emailConfig = {
-                host: 'smtp.gmail.com',
-                port: 587,
-                secure: false, // Must be false for 587
-                requireTLS: true,
-                auth: {
-                    user: user,
-                    pass: pass
-                },
-                // Use a single connection instead of pooling to avoid "socket hang up" on Render
-                pool: false,
-                // Render specific: Force IPv4 and very long timeouts
-                family: 4,
-                connectionTimeout: 120000, // Increased to 2 minutes
-                greetingTimeout: 120000,
-                socketTimeout: 120000,
-                dnsTimeout: 60000,
-                debug: true,
-                logger: true
-            };
+        connectionTimeout: 30000,
+        greetingTimeout: 30000,
+        socketTimeout: 30000,
 
-            this.transporter = nodemailer.createTransport(emailConfig);
-
-            // Note: We skip .verify() here to avoid blocking initialization
-            // and potential timeouts during Render's cold start/spin-up.
-            console.log('✅ EmailService: Transporter initialized (verify deferred)');
-
-        } catch (error) {
-            console.error('❌ EmailService initialization failed:', error.message);
-            this.transporter = null;
-        }
-    }
+        logger: true,
+        debug: true
+    });
 
     /**
      * Generate a professional HTML email template
