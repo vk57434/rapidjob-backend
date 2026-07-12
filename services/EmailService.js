@@ -215,9 +215,6 @@ class EmailService {
         </div>
         <div class="email-footer">
             <p>&copy; ${new Date().getFullYear()} RapidJob. All rights reserved.</p>
-            <p style="margin-top: 8px; font-size: 12px;">
-                123 Job Street, Tech City, TC 12345
-            </p>
         </div>
     </div>
 </body>
