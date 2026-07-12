@@ -32,25 +32,26 @@ class EmailService {
                 return;
             }
 
-            // Simplified configuration for high reliability on cloud platforms
+            // Robust configuration for high reliability on cloud platforms (Render/Heroku)
             const emailConfig = {
-                host: 'smtp.gmail.com',
-                port: 465,
-                secure: true,
+                service: 'gmail',
                 auth: {
                     user: user,
                     pass: pass
                 },
-                // Force IPv4 to avoid Render/Gmail IPv6 issues
+                // Use port 587 for better compatibility with cloud providers
+                port: 587,
+                secure: false, // true for 465, false for other ports
+                // Force IPv4 to avoid Render/Gmail IPv6 timeout issues
                 family: 4,
                 tls: {
                     rejectUnauthorized: false,
-                    // Use common ciphers for better compatibility
-                    ciphers: 'SSLv3'
+                    // Modern ciphers
+                    minVersion: 'TLSv1.2'
                 },
-                connectionTimeout: 60000,
-                greetingTimeout: 60000,
-                socketTimeout: 60000,
+                connectionTimeout: 30000,
+                greetingTimeout: 30000,
+                socketTimeout: 30000,
                 // Enable debugging in Render logs
                 debug: true,
                 logger: true
