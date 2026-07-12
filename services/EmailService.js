@@ -5,32 +5,38 @@ const { db } = require('../firebase-admin');
  * EmailService - Reusable service for sending all types of emails in RapidJob
  */
 class EmailService {
+
     constructor() {
-        this.transporter = null;
         this.initializeTransporter();
     }
 
-    /**
-     * Initialize Nodemailer transporter using environment variables
-     */
-    const transporter = nodemailer.createTransport({
-        host: process.env.EMAIL_HOST,
-        port: Number(process.env.EMAIL_PORT),
-        secure: false,          // Port 587
-        requireTLS: true,
+    initializeTransporter() {
+        const { EMAIL_HOST, EMAIL_PORT, EMAIL_USER, EMAIL_PASS, EMAIL_SECURE } = process.env;
 
-        auth: {
-            user: process.env.EMAIL_USER,
-            pass: process.env.EMAIL_PASS
-        },
+        if (!EMAIL_HOST || !EMAIL_PORT || !EMAIL_USER || !EMAIL_PASS) {
+            console.warn("⚠️ EmailService: Missing required environment variables (EMAIL_HOST, EMAIL_PORT, EMAIL_USER, EMAIL_PASS). Emails will not be sent.");
+            this.transporter = null;
+            return;
+        }
 
-        connectionTimeout: 30000,
-        greetingTimeout: 30000,
-        socketTimeout: 30000,
+        this.transporter = nodemailer.createTransport({
+            host: EMAIL_HOST,
+            port: Number(EMAIL_PORT),
+            secure: EMAIL_SECURE === "true",
+            auth: {
+                user: EMAIL_USER,
+                pass: EMAIL_PASS
+            },
+            logger: true,
+            debug: true
+        });
 
-        logger: true,
-        debug: true
-    });
+        console.log("✅ EmailService initialized successfully");
+        console.log(`📧 SMTP Host: ${EMAIL_HOST}`);
+        console.log(`📧 SMTP Port: ${EMAIL_PORT}`);
+        console.log(`📧 Secure: ${EMAIL_SECURE}`);
+        console.log(`📧 Email User: ${EMAIL_USER}`);
+    }
 
     /**
      * Generate a professional HTML email template
