@@ -73,12 +73,13 @@ class PaymentService {
             // Map Firestore data to service-compatible format
             // category helps determine if it's a RECRUITER or JOB_SEEKER plan
             const category = (data.category || '').toUpperCase();
+            const maxJobPosts = parseInt(data.maxJobPosts) || 0;
 
             return {
                 planName: data.name || 'Unknown Plan',
                 durationDays: parseInt(data.durationDays) || 30,
-                maxJobPosts: parseInt(data.maxJobPosts) || 0,
-                isRecruiter: category === 'RECRUITER' || category === 'DASHBOARD',
+                maxJobPosts: maxJobPosts,
+                isRecruiter: maxJobPosts > 0 || category === 'RECRUITER' || category === 'DASHBOARD',
                 price: data.price,
                 gst: data.gst
             };
@@ -100,7 +101,7 @@ class PaymentService {
         return null;
     }
 
-    async activateSubscription(uid, planId, planDetails, paymentDetails) {
+    async activateSubscription(uid, planId, planDetails, paymentDetails, role) {
         const now = Date.now();
         const expiry = now + (planDetails.durationDays * 24 * 60 * 60 * 1000);
 
@@ -134,7 +135,14 @@ class PaymentService {
             updatedAt: admin.firestore.FieldValue.serverTimestamp()
         };
 
-        const collection = planDetails.isRecruiter ? 'subscriptions' : 'jobSeekerSubscriptions';
+        // Determine collection based on explicit role OR plan logic (Fallback)
+        let collection = 'subscriptions'; // Default for recruiters
+        if (role) {
+            collection = (role === 'RECRUITER') ? 'subscriptions' : 'jobSeekerSubscriptions';
+        } else {
+            collection = planDetails.isRecruiter ? 'subscriptions' : 'jobSeekerSubscriptions';
+        }
+
         await db.collection(collection).doc(uid).set(firestoreSubData, { merge: true });
         console.log(`[FIRESTORE_UPDATED] Collection: ${collection}, UID: ${uid}`);
 

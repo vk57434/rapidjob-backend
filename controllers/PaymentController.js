@@ -88,7 +88,8 @@ class PaymentController {
                 uid,
                 planId,
                 planDetails,
-                paymentDetails
+                paymentDetails,
+                req.user.role // Pass role from middleware
             );
 
             console.log('[VERIFY_SUCCESS] Subscription activated for UID:', uid);
