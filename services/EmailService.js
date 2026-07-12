@@ -34,14 +34,23 @@ class EmailService {
 
             // Gmail SMTP configuration with high timeouts to prevent Render connection timeouts
             const emailConfig = {
-                service: 'gmail',
+                host: process.env.EMAIL_HOST || 'smtp.gmail.com',
+                port: parseInt(process.env.EMAIL_PORT) || 465,
+                secure: process.env.EMAIL_SECURE === 'true' || (process.env.EMAIL_PORT === '465') || true,
                 auth: {
                     user: user,
                     pass: pass
                 },
-                connectionTimeout: 30000,
-                greetingTimeout: 30000,
-                socketTimeout: 30000
+                tls: {
+                    // Do not fail on invalid certs
+                    rejectUnauthorized: false
+                },
+                connectionTimeout: 60000, // Increased to 60s for Render
+                greetingTimeout: 60000,
+                socketTimeout: 60000,
+                pool: true, // Use connection pooling
+                maxConnections: 5,
+                maxMessages: 100
             };
 
             this.transporter = nodemailer.createTransport(emailConfig);
