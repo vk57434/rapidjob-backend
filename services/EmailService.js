@@ -1,16 +1,8 @@
 const nodemailer = require('nodemailer');
+const { db } = require('../firebase-admin');
 
 /**
  * EmailService - Reusable service for sending all types of emails in RapidJob
- * Future-ready for:
- * - Interview Invitation
- * - Candidate Shortlisted
- * - Candidate Rejected
- * - Offer Letter
- * - Subscription Expiry Reminder
- * - Payment Success
- * - Password Reset
- * - Welcome Email
  */
 class EmailService {
     constructor() {
@@ -32,9 +24,7 @@ class EmailService {
                 return;
             }
 
-            // Ultra-robust Gmail configuration for Render/Cloud Platforms
-            // Using the 'service' property is the most reliable way as nodemailer
-            // handles all the specific Gmail SMTP settings internally.
+            // High reliability configuration for Render (Free Tier)
             const emailConfig = {
                 service: 'gmail',
                 auth: {
@@ -42,26 +32,19 @@ class EmailService {
                     pass: pass
                 },
                 // Render specific: Force IPv4 and increase timeouts significantly
-                // to handle "spin down" or slow network resolution.
                 family: 4,
-                connectionTimeout: 60000, // 60 seconds
+                connectionTimeout: 60000, // 1 minute
                 greetingTimeout: 60000,
                 socketTimeout: 60000,
-                dnsTimeout: 30000,
                 debug: true,
                 logger: true
             };
 
             this.transporter = nodemailer.createTransport(emailConfig);
 
-            // Verify connection configuration
-            this.transporter.verify((error, success) => {
-                if (error) {
-                    console.error('❌ SMTP VERIFY FAILED:', error);
-                } else {
-                    console.log('✅ SMTP READY - Server is ready to take our messages');
-                }
-            });
+            // Note: We skip .verify() here to avoid blocking initialization
+            // and potential timeouts during Render's cold start/spin-up.
+            console.log('✅ EmailService: Transporter initialized (verify deferred)');
 
         } catch (error) {
             console.error('❌ EmailService initialization failed:', error.message);
@@ -71,14 +54,6 @@ class EmailService {
 
     /**
      * Generate a professional HTML email template
-     * @param {Object} options - Email template options
-     * @param {string} options.title - Email subject/title
-     * @param {string} options.greeting - Greeting text (e.g., "Hello John,")
-     * @param {string} options.content - Main email content
-     * @param {string} options.buttonText - Button text (optional)
-     * @param {string} options.buttonUrl - Button URL (optional)
-     * @param {string} options.footer - Footer text (optional)
-     * @returns {string} HTML email template
      */
     generateTemplate(options) {
         const {
@@ -86,8 +61,7 @@ class EmailService {
             greeting = 'Hello,',
             content = '',
             buttonText,
-            buttonUrl,
-            footer = 'Best regards,<br>The RapidJob Team'
+            buttonUrl
         } = options;
 
         return `
@@ -206,7 +180,7 @@ class EmailService {
             ` : ''}
             <div class="divider"></div>
             <p style="color: #666; font-size: 15px;">
-                ${footer}
+                Best regards,<br>The RapidJob Team
             </p>
         </div>
         <div class="email-footer">
@@ -219,32 +193,16 @@ class EmailService {
 
     /**
      * Send an email
-     * @param {Object} emailOptions - Email options
-     * @param {string} emailOptions.to - Recipient email
-     * @param {string} emailOptions.subject - Email subject
-     * @param {string} emailOptions.html - HTML content
-     * @param {string} [emailOptions.text] - Plain text content (optional)
-     * @returns {Promise<Object>} Send result
      */
     async sendEmail(emailOptions) {
         const { to, subject, html, text } = emailOptions;
 
-        console.log('📧 EmailService: Preparing to send email:', {
-            to,
-            subject,
-            timestamp: new Date().toISOString()
-        });
+        console.log('📧 EmailService: Preparing to send email:', { to, subject });
 
         try {
-            // If transporter is not available (no credentials), just log the email
             if (!this.transporter) {
-                console.log('📧 EmailService (SIMULATION): Email would be sent');
-                console.log('📧 Email Content:', html);
-                return {
-                    success: true,
-                    simulated: true,
-                    message: 'Email simulation complete - no email credentials configured'
-                };
+                console.log('📧 EmailService (SIMULATION): Email would be sent to:', to);
+                return { success: true, simulated: true };
             }
 
             const mailOptions = {
@@ -255,154 +213,27 @@ class EmailService {
                 text: text || this.htmlToText(html)
             };
 
-            console.log("Connecting to Gmail SMTP...");
             const info = await this.transporter.sendMail(mailOptions);
+            console.log('✅ EMAIL SENT:', info.messageId);
 
-            console.log('✅ EMAIL SENT');
-            console.log('Message ID:', info.messageId);
-            console.log('Info:', info);
-
-            return {
-                success: true,
-                messageId: info.messageId,
-                message: 'Email sent successfully'
-            };
+            return { success: true, messageId: info.messageId };
         } catch (error) {
-            console.error('❌ EMAIL FAILED TO SEND');
-            console.error('Error Code:', error.code);
-            console.error('Error Command:', error.command);
-            console.error('Error Response:', error.response);
-            console.error('Error ResponseCode:', error.responseCode);
-            console.error('Full Error:', error);
-
-            return {
-                success: false,
-                error: error.message,
-                code: error.code,
-                message: 'Failed to send email'
-            };
+            console.error('❌ EMAIL FAILED:', error.message);
+            return { success: false, error: error.message };
         }
     }
 
-    /**
-     * Simple HTML to plain text converter
-     */
     htmlToText(html) {
-        return html
-            .replace(/<[^>]+>/g, '')
-            .replace(/\s+/g, ' ')
-            .trim();
+        return html.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
     }
 
-    /**
-     * Send Job Application Notification to Recruiter
-     */
     async sendJobApplicationNotification(data) {
-        const {
-            recruiterEmail,
-            recruiterName,
-            jobTitle,
-            companyName,
-            location,
-            salary,
-            jobType,
-            jobId,
-            applicantName,
-            applicantEmail,
-            phone,
-            resumeUrl,
-            skills,
-            experience,
-            appliedAt
-        } = data;
+        const { recruiterEmail, recruiterName, jobTitle, applicantName, applicantEmail } = data;
 
-        console.log('📧 EmailService: Sending job application notification to recruiter:', recruiterEmail);
-
-        // Format skills as comma-separated string
-        const skillsStr = Array.isArray(skills) ? skills.join(', ') : skills || 'Not specified';
-        const experienceStr = experience || 'Not specified';
-
-        // Format date
-        const appliedDate = new Date(appliedAt || Date.now()).toLocaleString('en-US', {
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
-        });
-
-        const content = `
-            <p>Great news! You've received a new application for your job posting.</p>
-            
-            <div class="details-card">
-                <h4>📋 Job Details</h4>
-                <div class="details-row">
-                    <span class="details-label">Job Title:</span>
-                    <span class="details-value">${jobTitle}</span>
-                </div>
-                <div class="details-row">
-                    <span class="details-label">Company:</span>
-                    <span class="details-value">${companyName}</span>
-                </div>
-                <div class="details-row">
-                    <span class="details-label">Location:</span>
-                    <span class="details-value">${location || 'Not specified'}</span>
-                </div>
-                ${salary ? `
-                <div class="details-row">
-                    <span class="details-label">Salary:</span>
-                    <span class="details-value">${salary}</span>
-                </div>
-                ` : ''}
-                ${jobType ? `
-                <div class="details-row">
-                    <span class="details-label">Job Type:</span>
-                    <span class="details-value">${jobType}</span>
-                </div>
-                ` : ''}
-            </div>
-
-            <div class="details-card">
-                <h4>👤 Applicant Details</h4>
-                <div class="details-row">
-                    <span class="details-label">Name:</span>
-                    <span class="details-value">${applicantName}</span>
-                </div>
-                <div class="details-row">
-                    <span class="details-label">Email:</span>
-                    <span class="details-value"><a href="mailto:${applicantEmail}">${applicantEmail}</a></span>
-                </div>
-                <div class="details-row">
-                    <span class="details-label">Phone:</span>
-                    <span class="details-value">${phone || 'Not provided'}</span>
-                </div>
-                <div class="details-row">
-                    <span class="details-label">Experience:</span>
-                    <span class="details-value">${experienceStr}</span>
-                </div>
-                <div class="details-row">
-                    <span class="details-label">Skills:</span>
-                    <span class="details-value">${skillsStr}</span>
-                </div>
-                ${resumeUrl ? `
-                <div class="details-row">
-                    <span class="details-label">Resume:</span>
-                    <span class="details-value"><a href="${resumeUrl}" target="_blank">View Resume</a></span>
-                </div>
-                ` : ''}
-                <div class="details-row">
-                    <span class="details-label">Applied On:</span>
-                    <span class="details-value">${appliedDate}</span>
-                </div>
-            </div>
-
-            <p style="margin-top: 20px;">
-                Log in to your RapidJob recruiter dashboard to review the application and take further action.
-            </p>
-        `;
+        const content = `<p>You've received a new application for <b>${jobTitle}</b> from <b>${applicantName}</b> (${applicantEmail}).</p>`;
 
         const html = this.generateTemplate({
-            title: 'New Job Application Received - RapidJob',
+            title: 'New Job Application',
             greeting: `Hello ${recruiterName || 'Recruiter'},`,
             content,
             buttonText: 'View Applications',
@@ -411,179 +242,60 @@ class EmailService {
 
         return await this.sendEmail({
             to: recruiterEmail,
-            subject: `New Application: ${applicantName} applied for "${jobTitle}" - RapidJob`,
+            subject: `New Application: ${applicantName} for ${jobTitle}`,
             html
         });
     }
 
-    /**
-     * Send Job Post Notification to Admin
-     */
     async sendJobPostAdminNotification(data) {
-        const {
-            recruiterId,
-            recruiterName,
-            jobTitle,
-            companyName,
-            jobId,
-            timestamp
-        } = data;
+        const { recruiterName, jobTitle, companyName, jobId } = data;
 
-        const adminEmail = process.env.ADMIN_EMAIL || 'max459010@gmail.com';
-        console.log('📧 EmailService: Sending job post notification to admin:', adminEmail);
-
-        let jobDetails = { jobTitle, companyName, jobId };
-        let recruiterDetails = { recruiterId, recruiterName };
-
-        // Fetch additional details from Firestore for a complete report
+        let description = 'No description provided.';
         try {
-            const { db } = require('../firebase-admin');
-
-            // 1. Fetch Job Document
             const jobDoc = await db.collection('jobs').doc(jobId).get();
             if (jobDoc.exists) {
-                const jd = jobDoc.data();
-                jobDetails = {
-                    ...jobDetails,
-                    location: jd.location,
-                    salary: jd.salary,
-                    jobType: jd.jobType,
-                    experience: jd.experience,
-                    description: jd.description,
-                    postedDate: jd.postedTime || jd.postedDate || timestamp
-                };
+                description = jobDoc.data().description || description;
             }
-
-            // 2. Fetch Recruiter Document
-            const recruiterDoc = await db.collection('users').doc(recruiterId).get();
-            if (recruiterDoc.exists) {
-                const rd = recruiterDoc.data();
-                recruiterDetails = {
-                    ...recruiterDetails,
-                    email: rd.email,
-                    phone: rd.phone
-                };
-            }
-        } catch (dbError) {
-            console.warn('⚠️ EmailService: Database fetch failed, using partial info:', dbError.message);
-        }
+        } catch (e) { console.warn('DB Fetch failed:', e.message); }
 
         const content = `
-            <p>A new job has been posted on RapidJob.</p>
-
+            <p>A new job has been posted by <b>${recruiterName}</b> at <b>${companyName}</b>.</p>
             <div class="details-card">
-                <h4>📋 Job Details</h4>
-                <div class="details-row">
-                    <span class="details-label">Job Title:</span>
-                    <span class="details-value">${jobDetails.jobTitle}</span>
-                </div>
-                <div class="details-row">
-                    <span class="details-label">Company:</span>
-                    <span class="details-value">${jobDetails.companyName}</span>
-                </div>
-                <div class="details-row">
-                    <span class="details-label">Location:</span>
-                    <span class="details-value">${jobDetails.location || 'Not specified'}</span>
-                </div>
-                <div class="details-row">
-                    <span class="details-label">Salary:</span>
-                    <span class="details-value">${jobDetails.salary || 'Not specified'}</span>
-                </div>
-                <div class="details-row">
-                    <span class="details-label">Job Type:</span>
-                    <span class="details-value">${jobDetails.jobType || 'Not specified'}</span>
-                </div>
-                <div class="details-row">
-                    <span class="details-label">Experience:</span>
-                    <span class="details-value">${jobDetails.experience || 'Not specified'}</span>
-                </div>
-                <div class="details-row">
-                    <span class="details-label">Job ID:</span>
-                    <span class="details-value"><code>${jobId}</code></span>
-                </div>
-                <div class="details-row">
-                    <span class="details-label">Posted On:</span>
-                    <span class="details-value">${jobDetails.postedDate || new Date().toLocaleString()}</span>
-                </div>
+                <h4>Job Details</h4>
+                <p><b>Title:</b> ${jobTitle}</p>
+                <p><b>ID:</b> ${jobId}</p>
+                <p><b>Description:</b> ${description.substring(0, 200)}...</p>
             </div>
-
-            <div class="details-card">
-                <h4>👤 Recruiter Details</h4>
-                <div class="details-row">
-                    <span class="details-label">Name:</span>
-                    <span class="details-value">${recruiterDetails.recruiterName}</span>
-                </div>
-                <div class="details-row">
-                    <span class="details-label">Email:</span>
-                    <span class="details-value">${recruiterDetails.email || 'Not provided'}</span>
-                </div>
-                <div class="details-row">
-                    <span class="details-label">Phone:</span>
-                    <span class="details-value">${recruiterDetails.phone || 'Not provided'}</span>
-                </div>
-                <div class="details-row">
-                    <span class="details-label">Recruiter ID:</span>
-                    <span class="details-value"><code>${recruiterId}</code></span>
-                </div>
-            </div>
-
-            <div class="details-card">
-                <h4>📝 Job Description</h4>
-                <div class="content" style="white-space: pre-line; color: #555; font-size: 14px;">
-                    ${jobDetails.description || 'No description provided.'}
-                </div>
-            </div>
-
-            <p style="margin-top: 20px;">
-                You can review this job in the Admin Panel.
-            </p>
         `;
 
         const html = this.generateTemplate({
-            title: 'New Job Posted - RapidJob',
+            title: 'New Job Posted',
             greeting: 'Hello Admin,',
             content,
-            buttonText: 'Open Admin Panel',
+            buttonText: 'Review Job',
             buttonUrl: 'https://rapidjob.app/admin/jobs'
         });
 
         return await this.sendEmail({
-            to: adminEmail,
-            subject: 'New Job Posted - RapidJob',
+            to: process.env.ADMIN_EMAIL || 'max459010@gmail.com',
+            subject: `New Job Posted: ${jobTitle} at ${companyName}`,
             html
         });
     }
 
-    /**
-     * Send Welcome Email to New User (future use)
-     */
     async sendWelcomeEmail(data) {
         const { email, name, role } = data;
-
-        const content = `
-            <p>Welcome to RapidJob! 🎉</p>
-            <p>We're excited to have you join our platform as a ${role.toLowerCase()}.</p>
-            <p>Here's what you can do next:</p>
-            <ul style="margin: 15px 0; padding-left: 20px;">
-                <li>Complete your profile</li>
-                <li>Explore ${role === 'RECRUITER' ? 'posting jobs' : 'job opportunities'}</li>
-                <li>Connect with ${role === 'RECRUITER' ? 'talent' : 'employers'}</li>
-            </ul>
-        `;
+        const content = `<p>Welcome to RapidJob! You've joined as a ${role}.</p>`;
 
         const html = this.generateTemplate({
-            title: 'Welcome to RapidJob!',
+            title: 'Welcome!',
             greeting: `Hello ${name},`,
             content,
-            buttonText: 'Go to Dashboard',
+            buttonText: 'Get Started',
             buttonUrl: 'https://rapidjob.app/dashboard'
         });
 
-        return await this.sendEmail({
-            to: email,
-            subject: 'Welcome to RapidJob!',
-            html
-        });
+        return await this.sendEmail({ to: email, subject: 'Welcome to RapidJob!', html });
     }
 }
 
