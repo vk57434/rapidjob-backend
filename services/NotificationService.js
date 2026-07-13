@@ -1,15 +1,15 @@
 const { db } = require('../firebase-admin');
 
 class NotificationService {
-    async sendNotification(userId, title, message, data = {}) {
+    async sendNotification(receiverUid, title, message, data = {}) {
         try {
             const notification = {
-                userId,
+                receiverUid,
                 title,
                 message,
-                data,
-                isRead: false,
-                timestamp: new Date().toISOString()
+                payload: data,
+                readStatus: false,
+                createdAt: new Date()
             };
             return await db.collection('notifications').add(notification);
         } catch (error) {
@@ -19,8 +19,8 @@ class NotificationService {
 
     async getNotifications(userId) {
         const snapshot = await db.collection('notifications')
-            .where('userId', '==', userId)
-            .orderBy('timestamp', 'desc')
+            .where('receiverUid', '==', userId)
+            .orderBy('createdAt', 'desc')
             .get();
         return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     }
