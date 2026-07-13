@@ -19,25 +19,34 @@ class EmailService {
             return;
         }
 
-        this.transporter = nodemailer.createTransport({
+        const isGmail = process.env.EMAIL_HOST && process.env.EMAIL_HOST.includes('gmail');
+
+        const config = {
             host: process.env.EMAIL_HOST,
             port: Number(process.env.EMAIL_PORT),
             secure: process.env.EMAIL_SECURE === "true",
-
             auth: {
                 user: process.env.EMAIL_USER,
                 pass: process.env.EMAIL_PASS
             },
-
             family: 4,
-            connectionTimeout: 120000,
-            greetingTimeout: 120000,
-            socketTimeout: 120000,
-            dnsTimeout: 60000,
-
+            connectionTimeout: 10000, // Reduced to 10s for faster feedback
+            greetingTimeout: 10000,
+            socketTimeout: 15000,
+            dnsTimeout: 10000,
             logger: true,
             debug: true
-        });
+        };
+
+        // If it's Gmail, use the service option which is more robust for cloud deployments
+        if (isGmail) {
+            delete config.host;
+            delete config.port;
+            delete config.secure;
+            config.service = 'gmail';
+        }
+
+        this.transporter = nodemailer.createTransport(config);
 
         console.log("✅ EmailService initialized successfully");
         console.log(`📧 SMTP Host: ${EMAIL_HOST}`);
