@@ -223,6 +223,7 @@ class EmailService {
         const location = jobData.location || 'Not specified';
         const salary = jobData.salary || 'Not specified';
         const jobType = jobData.jobType || 'Not specified';
+        const vacancies = jobData.vacancies || '1';
 
         const content = `
             <p>A new job has been posted by <b>${recruiterName}</b> at <b>${companyName}</b>.</p>
@@ -244,10 +245,14 @@ class EmailService {
                     <span class="details-label">Type:</span>
                     <span class="details-value">${jobType}</span>
                 </div>
+                <div class="details-row">
+                    <span class="details-label">Vacancies:</span>
+                    <span class="details-value">${vacancies}</span>
+                </div>
                 <div class="divider"></div>
                 <p><b>Description:</b></p>
-                <p style="font-size: 14px; color: #666; margin-top: 5px;">
-                    ${description.length > 300 ? description.substring(0, 300) + '...' : description}
+                <p style="font-size: 14px; color: #666; margin-top: 5px; white-space: pre-line;">
+                    ${description}
                 </p>
             </div>
         `;

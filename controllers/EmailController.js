@@ -112,6 +112,11 @@ class EmailController {
                 jobTitle,
                 companyName,
                 jobId,
+                location,
+                salary,
+                jobType,
+                description,
+                vacancies,
                 timestamp
             } = req.body;
 
@@ -129,6 +134,13 @@ class EmailController {
                 jobTitle,
                 companyName,
                 jobId,
+                jobData: {
+                    location,
+                    salary,
+                    jobType,
+                    description,
+                    vacancies
+                },
                 timestamp
             });
 
