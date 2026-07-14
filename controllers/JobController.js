@@ -15,10 +15,9 @@ class JobController {
 
            console.log('Job created successfully with ID:', docRef.id);
 
+           /*
            try {
-
                console.log("📧 Sending admin notification email...");
-
                const emailResult = await emailService.sendJobPostAdminNotification({
                    recruiterId: req.user.uid,
                    recruiterName:
@@ -31,14 +30,11 @@ class JobController {
                    jobData: jobData,
                    timestamp: Date.now()
                });
-
                console.log("📧 Email Result:", emailResult);
-
            } catch (emailError) {
-
                console.error("❌ Email Error:", emailError);
-
            }
+           */
 
            res.status(201).json({
                id: docRef.id,
