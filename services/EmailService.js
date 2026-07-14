@@ -1,58 +1,26 @@
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 const { db } = require('../firebase-admin');
 
 /**
- * EmailService - Reusable service for sending all types of emails in RapidJob
+ * EmailService - Reusable service using Resend API to bypass SMTP blocks on Render
  */
 class EmailService {
 
     constructor() {
-        this.initializeTransporter();
+        this.initializeResend();
     }
 
-    initializeTransporter() {
-        const { EMAIL_HOST, EMAIL_PORT, EMAIL_USER, EMAIL_PASS, EMAIL_SECURE } = process.env;
+    initializeResend() {
+        const apiKey = process.env.RESEND_API_KEY;
 
-        if (!EMAIL_HOST || !EMAIL_PORT || !EMAIL_USER || !EMAIL_PASS) {
-            console.warn("⚠️ EmailService: Missing required environment variables (EMAIL_HOST, EMAIL_PORT, EMAIL_USER, EMAIL_PASS). Emails will not be sent.");
-            this.transporter = null;
+        if (!apiKey) {
+            console.warn("⚠️ EmailService: Missing RESEND_API_KEY. Emails will be simulated.");
+            this.resend = null;
             return;
         }
 
-        const isGmail = process.env.EMAIL_HOST && process.env.EMAIL_HOST.includes('gmail');
-
-        const config = {
-            host: process.env.EMAIL_HOST,
-            port: Number(process.env.EMAIL_PORT),
-            secure: process.env.EMAIL_SECURE === "true",
-            auth: {
-                user: process.env.EMAIL_USER,
-                pass: process.env.EMAIL_PASS
-            },
-            family: 4,
-            connectionTimeout: 10000, // Reduced to 10s for faster feedback
-            greetingTimeout: 10000,
-            socketTimeout: 15000,
-            dnsTimeout: 10000,
-            logger: true,
-            debug: true
-        };
-
-        // If it's Gmail, use the service option which is more robust for cloud deployments
-        if (isGmail) {
-            delete config.host;
-            delete config.port;
-            delete config.secure;
-            config.service = 'gmail';
-        }
-
-        this.transporter = nodemailer.createTransport(config);
-
-        console.log("✅ EmailService initialized successfully");
-        console.log(`📧 SMTP Host: ${EMAIL_HOST}`);
-        console.log(`📧 SMTP Port: ${EMAIL_PORT}`);
-        console.log(`📧 Secure: ${EMAIL_SECURE}`);
-        console.log(`📧 Email User: ${EMAIL_USER}`);
+        this.resend = new Resend(apiKey);
+        console.log("✅ EmailService (Resend API) initialized successfully");
     }
 
     /**
@@ -195,39 +163,37 @@ class EmailService {
     }
 
     /**
-     * Send an email
+     * Send an email using Resend API
      */
     async sendEmail(emailOptions) {
-        const { to, subject, html, text } = emailOptions;
+        const { to, subject, html } = emailOptions;
 
-        console.log('📧 EmailService: Preparing to send email:', { to, subject });
+        console.log('📧 EmailService: Preparing to send email via API:', { to, subject });
 
         try {
-            if (!this.transporter) {
+            if (!this.resend) {
                 console.log('📧 EmailService (SIMULATION): Email would be sent to:', to);
                 return { success: true, simulated: true };
             }
 
-            const mailOptions = {
-                from: `"RapidJob" <${process.env.EMAIL_USER}>`,
-                to,
-                subject,
-                html,
-                text: text || this.htmlToText(html)
-            };
+            const { data, error } = await this.resend.emails.send({
+                from: 'RapidJob <onboarding@resend.dev>',
+                to: [to],
+                subject: subject,
+                html: html
+            });
 
-            const info = await this.transporter.sendMail(mailOptions);
-            console.log('✅ EMAIL SENT:', info.messageId);
+            if (error) {
+                console.error('❌ RESEND API ERROR:', error);
+                return { success: false, error: error.message };
+            }
 
-            return { success: true, messageId: info.messageId };
+            console.log('✅ EMAIL SENT VIA API:', data.id);
+            return { success: true, messageId: data.id };
         } catch (error) {
             console.error('❌ EMAIL FAILED:', error.message);
             return { success: false, error: error.message };
         }
-    }
-
-    htmlToText(html) {
-        return html.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
     }
 
     async sendJobApplicationNotification(data) {
