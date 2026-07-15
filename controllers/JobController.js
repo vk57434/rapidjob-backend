@@ -1,5 +1,6 @@
 const { db } = require('../firebase-admin');
 const emailService = require('../services/EmailService');
+const whatsappService = require('../services/WhatsAppService');
 
 class JobController {
     async createJob(req, res) {
@@ -15,26 +16,32 @@ class JobController {
 
            console.log('Job created successfully with ID:', docRef.id);
 
-           /*
+           // 1. Send Email Notification
            try {
                console.log("📧 Sending admin notification email...");
-               const emailResult = await emailService.sendJobPostAdminNotification({
+               await emailService.sendJobPostAdminNotification({
                    recruiterId: req.user.uid,
-                   recruiterName:
-                       jobData.recruiterName ||
-                       req.user.name ||
-                       "Recruiter",
+                   recruiterName: jobData.recruiterName || req.user.name || "Recruiter",
                    companyName: jobData.companyName,
                    jobTitle: jobData.jobTitle,
                    jobId: docRef.id,
                    jobData: jobData,
                    timestamp: Date.now()
                });
-               console.log("📧 Email Result:", emailResult);
            } catch (emailError) {
                console.error("❌ Email Error:", emailError);
            }
-           */
+
+           // 2. Send WhatsApp Notification
+           try {
+               console.log("💬 Sending WhatsApp notification...");
+               await whatsappService.sendAdminNotification({
+                   ...jobData,
+                   id: docRef.id
+               });
+           } catch (waError) {
+               console.error("❌ WhatsApp Error:", waError);
+           }
 
            res.status(201).json({
                id: docRef.id,
