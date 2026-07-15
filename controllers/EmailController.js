@@ -1,4 +1,5 @@
 const EmailService = require('../services/EmailService');
+const WhatsAppService = require('../services/WhatsAppService');
 
 /**
  * EmailController - Handles all email-related API requests
@@ -143,6 +144,21 @@ class EmailController {
                 },
                 timestamp
             });
+
+            // Trigger WhatsApp as well
+            try {
+                await WhatsAppService.sendAdminNotification({
+                    jobTitle,
+                    companyName,
+                    location,
+                    salary,
+                    vacancies,
+                    recruiterName,
+                    id: jobId
+                });
+            } catch (waError) {
+                console.error("❌ EmailController: WhatsApp notify failed:", waError.message);
+            }
 
             res.status(200).json({
                 success: true,
