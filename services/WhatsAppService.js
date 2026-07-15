@@ -32,9 +32,16 @@ class WhatsAppService {
 
         try {
             const url = `https://api.ultramsg.com/${this.instanceId}/messages/chat`;
+
+            // Format number: remove +, then ensure it starts with 91
+            let formattedNumber = this.adminNumber.replace('+', '');
+            if (!formattedNumber.startsWith('91')) {
+                formattedNumber = `91${formattedNumber}`;
+            }
+
             const params = {
                 token: this.token,
-                to: this.adminNumber.startsWith('+') ? this.adminNumber : `+91${this.adminNumber}`,
+                to: formattedNumber,
                 body: message
             };
 
