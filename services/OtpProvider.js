@@ -12,18 +12,20 @@ class OtpProvider {
 
 class ConsoleOtpProvider extends OtpProvider {
     async sendOtp(phoneNumber, otp) {
-        console.log(`[OTP] Sending ${otp} to ${phoneNumber} via Console`);
+        console.log(`[OTP-DEBUG] Sending ${otp} to ${phoneNumber} via Console`);
         return true;
     }
 }
 
 /**
  * RapidJob Firestore Gateway Provider
- * Adds SMS to Firestore 'smsQueue' for the Android Gateway App to pick up.
+ * Communicates with the Android SMS Gateway via Firestore.
+ * This is the production provider that avoids log scraping.
  */
 class FirestoreOtpProvider extends OtpProvider {
     async sendOtp(phoneNumber, otp) {
         try {
+            // Requirement 4 & 7: Use Firestore as the primary communication channel
             await db.collection("smsQueue").add({
                 phoneNumber,
                 message: `Your RapidJob OTP is ${otp}. Valid for 5 minutes.`,
@@ -31,7 +33,9 @@ class FirestoreOtpProvider extends OtpProvider {
                 createdAt: new Date(),
                 retryCount: 0
             });
-            console.log(`[OTP] Queued for ${phoneNumber} in smsQueue`);
+
+            // Log for server status, but logic doesn't depend on it
+            console.log(`[AUTH] OTP for ${phoneNumber} added to Firestore smsQueue`);
             return true;
         } catch (error) {
             console.error("[FirestoreOtpProvider] Error queueing SMS:", error);

@@ -6,10 +6,12 @@ const { auth } = require("../firebase-admin");
 
 class OtpService {
     /**
-     * Choose the provider based on the environment or preference.
+     * Requirement 8 & 9: Choose the provider based on the environment.
      * Use FirestoreOtpProvider for production SMS delivery via Android Gateway.
+     * Keep ConsoleOtpProvider for local development.
      */
     constructor() {
+        // Use Node Environment to swap providers automatically
         this.provider = process.env.NODE_ENV === "production"
             ? new FirestoreOtpProvider()
             : new ConsoleOtpProvider();
@@ -20,13 +22,13 @@ class OtpService {
     }
 
     async generateAndSendOtp(phoneNumber) {
-        // 1. Rate limiting check (3 requests every 10 mins)
+        // Requirement 10: Rate limiting check (3 requests every 10 mins)
         const existingOtp = await otpRepository.getOtp(phoneNumber);
         if (existingOtp) {
             const now = new Date();
             const tenMinutesAgo = new Date(now.getTime() - 10 * 60 * 1000);
 
-            // Access toDate() because of Firestore Timestamp object
+            // Handle Firestore Timestamp object to get Date
             const lastRequestDate = existingOtp.lastRequestAt?.toDate
                 ? existingOtp.lastRequestAt.toDate()
                 : new Date(existingOtp.lastRequestAt);
@@ -39,23 +41,24 @@ class OtpService {
             }
         }
 
-        // 2. Generate secure 6-digit OTP
+        // Requirement 1: Generate secure 6-digit OTP in Node.js
         const otp = crypto.randomInt(100000, 999999).toString();
 
-        // 3. Hash OTP
+        // Requirement 2: Hash OTP using bcrypt for security (Replay Attack Protection)
         const saltRounds = 10;
         const otpHash = await bcrypt.hash(otp, saltRounds);
 
-        // 4. Calculate expiry
+        // Requirement 3: Store OTP Hash and metadata in Firestore
         const expiresAt = new Date(Date.now() + this.EXPIRY_MINUTES * 60 * 1000);
-
-        // 5. Store OTP
         await otpRepository.saveOtp(phoneNumber, otpHash, expiresAt);
 
-        // 6. Send via provider (Console or Firestore Queue)
+        // Requirement 4 & 6: Send via configured provider (Console or Firestore Queue)
         return await this.provider.sendOtp(phoneNumber, otp);
     }
 
+    /**
+     * Requirement 10 & 11: Verify OTP using Firestore and bcrypt.
+     */
     async verifyOtp(phoneNumber, otp) {
         const otpData = await otpRepository.getOtp(phoneNumber);
 
@@ -74,23 +77,23 @@ class OtpService {
             throw new Error("OTP has expired.");
         }
 
-        // Check attempts
+        // Check attempts limit (5 attempts)
         if (otpData.attempts >= this.MAX_ATTEMPTS) {
-            await otpDocRef.delete(); // Delete and throw error
+            await otpRepository.deleteOtp(phoneNumber);
             throw new Error("Maximum verification attempts exceeded. Please request a new OTP.");
         }
 
-        // Verify hash
+        // Requirement 10: Verify hash using bcrypt
         const isValid = await bcrypt.compare(otp, otpData.otpHash);
         if (!isValid) {
             await otpRepository.incrementAttempts(phoneNumber);
             throw new Error(`Invalid OTP. ${this.MAX_ATTEMPTS - (otpData.attempts + 1)} attempts remaining.`);
         }
 
-        // Success - Delete OTP and create Firebase Custom Token
+        // Requirement 11: Success - Delete OTP document and create Firebase Custom Token
         await otpRepository.deleteOtp(phoneNumber);
 
-        // Create Firebase Custom Token for the login
+        // Generate Custom Token for user login using phone number as UID
         const customToken = await auth.createCustomToken(phoneNumber);
         return customToken;
     }
