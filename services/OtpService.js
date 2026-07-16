@@ -1,25 +1,37 @@
 const bcrypt = require("bcrypt");
 const crypto = require("crypto");
 const otpRepository = require("../repositories/OtpRepository");
-const { ConsoleOtpProvider } = require("./OtpProvider");
+const { ConsoleOtpProvider, FirestoreOtpProvider } = require("./OtpProvider");
 const { auth } = require("../firebase-admin");
 
 class OtpService {
-    constructor(provider = new ConsoleOtpProvider()) {
-        this.provider = provider;
+    /**
+     * Choose the provider based on the environment or preference.
+     * Use FirestoreOtpProvider for production SMS delivery via Android Gateway.
+     */
+    constructor() {
+        this.provider = process.env.NODE_ENV === "production"
+            ? new FirestoreOtpProvider()
+            : new ConsoleOtpProvider();
+
         this.EXPIRY_MINUTES = 5;
         this.MAX_ATTEMPTS = 5;
         this.MAX_REQUESTS_IN_10_MINS = 3;
     }
 
     async generateAndSendOtp(phoneNumber) {
-        // 1. Rate limiting check
+        // 1. Rate limiting check (3 requests every 10 mins)
         const existingOtp = await otpRepository.getOtp(phoneNumber);
         if (existingOtp) {
             const now = new Date();
             const tenMinutesAgo = new Date(now.getTime() - 10 * 60 * 1000);
 
-            if (existingOtp.lastRequestAt && existingOtp.lastRequestAt.toDate() > tenMinutesAgo) {
+            // Access toDate() because of Firestore Timestamp object
+            const lastRequestDate = existingOtp.lastRequestAt?.toDate
+                ? existingOtp.lastRequestAt.toDate()
+                : new Date(existingOtp.lastRequestAt);
+
+            if (lastRequestDate > tenMinutesAgo) {
                 if (existingOtp.requestCount >= this.MAX_REQUESTS_IN_10_MINS) {
                     throw new Error("Too many OTP requests. Please try again after 10 minutes.");
                 }
@@ -40,7 +52,7 @@ class OtpService {
         // 5. Store OTP
         await otpRepository.saveOtp(phoneNumber, otpHash, expiresAt);
 
-        // 6. Send via provider
+        // 6. Send via provider (Console or Firestore Queue)
         return await this.provider.sendOtp(phoneNumber, otp);
     }
 
@@ -51,15 +63,20 @@ class OtpService {
             throw new Error("OTP not found. Please request a new one.");
         }
 
+        // Handle Firestore Timestamp
+        const expiresAt = otpData.expiresAt?.toDate
+            ? otpData.expiresAt.toDate()
+            : new Date(otpData.expiresAt);
+
         // Check expiry
-        if (new Date() > otpData.expiresAt.toDate()) {
+        if (new Date() > expiresAt) {
             await otpRepository.deleteOtp(phoneNumber);
             throw new Error("OTP has expired.");
         }
 
         // Check attempts
         if (otpData.attempts >= this.MAX_ATTEMPTS) {
-            await otpRepository.deleteOtp(phoneNumber);
+            await otpDocRef.delete(); // Delete and throw error
             throw new Error("Maximum verification attempts exceeded. Please request a new OTP.");
         }
 
@@ -73,8 +90,7 @@ class OtpService {
         // Success - Delete OTP and create Firebase Custom Token
         await otpRepository.deleteOtp(phoneNumber);
 
-        // Return custom token (we use phone number as uid or link to existing user)
-        // For simplicity, we use phone as uid. In production, you might want to lookup by phone first.
+        // Create Firebase Custom Token for the login
         const customToken = await auth.createCustomToken(phoneNumber);
         return customToken;
     }
