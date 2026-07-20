@@ -25,6 +25,8 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Routes
 const authRoutes = require('./routes/auth.routes');
+const waapiRoutes = require('./routes/waapi.routes');
+const otpRoutes = require('./routes/otp.routes');
 const jobRoutes = require('./routes/job.routes');
 const applicationRoutes = require('./routes/application.routes');
 const paymentRoutes = require('./routes/payment.routes');
@@ -37,6 +39,8 @@ const emailRoutes = require('./routes/email.routes');
 const adminRoutes = require('./routes/admin.routes');
 
 app.use('/api/auth', authRoutes);
+app.use('/api/waapi', waapiRoutes);
+app.use('/api/otp', otpRoutes);
 app.use('/api/jobs', jobRoutes);
 app.use('/api/applications', applicationRoutes);
 app.use('/api/payment', paymentRoutes);
