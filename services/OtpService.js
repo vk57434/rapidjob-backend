@@ -1,20 +1,25 @@
 const bcrypt = require("bcrypt");
 const crypto = require("crypto");
 const otpRepository = require("../repositories/OtpRepository");
-const { ConsoleOtpProvider, FirestoreOtpProvider } = require("./OtpProvider");
+const { ConsoleOtpProvider, FirestoreOtpProvider, WaapiOtpProvider } = require("./OtpProvider");
 const { auth } = require("../firebase-admin");
 
 class OtpService {
     /**
      * Requirement 8 & 9: Choose the provider based on the environment.
-     * Use FirestoreOtpProvider for production SMS delivery via Android Gateway.
-     * Keep ConsoleOtpProvider for local development.
+     * Use WaapiOtpProvider for WhatsApp, FirestoreOtpProvider for production SMS, or Console for local development.
      */
     constructor() {
-        // Use Node Environment to swap providers automatically
-        this.provider = process.env.NODE_ENV === "production"
-            ? new FirestoreOtpProvider()
-            : new ConsoleOtpProvider();
+        // Use environment variable to choose provider
+        const providerType = process.env.OTP_PROVIDER || 'console';
+
+        if (providerType === 'whatsapp') {
+            this.provider = new WaapiOtpProvider();
+        } else if (providerType === 'android') {
+            this.provider = new FirestoreOtpProvider();
+        } else {
+            this.provider = new ConsoleOtpProvider();
+        }
 
         this.EXPIRY_MINUTES = 5;
         this.MAX_ATTEMPTS = 5;

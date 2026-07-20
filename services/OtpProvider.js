@@ -44,8 +44,31 @@ class FirestoreOtpProvider extends OtpProvider {
     }
 }
 
+/**
+ * WAAPI Provider
+ * Sends OTP via WhatsApp using WaApiService.
+ */
+class WaapiOtpProvider extends OtpProvider {
+    constructor() {
+        super();
+        this.waapiService = require('./WaApiService');
+    }
+
+    async sendOtp(phoneNumber, otp) {
+        try {
+            await this.waapiService.sendOTP(phoneNumber, otp);
+            console.log(`[AUTH] OTP for ${phoneNumber} sent via WhatsApp (WAAPI)`);
+            return true;
+        } catch (error) {
+            console.error("[WaapiOtpProvider] Error sending WhatsApp message:", error);
+            throw new Error("Failed to send WhatsApp message.");
+        }
+    }
+}
+
 module.exports = {
     OtpProvider,
     ConsoleOtpProvider,
-    FirestoreOtpProvider
+    FirestoreOtpProvider,
+    WaapiOtpProvider
 };

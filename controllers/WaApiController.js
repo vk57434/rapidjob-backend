@@ -1,4 +1,5 @@
 const WaApiService = require('../services/WaApiService');
+const OtpService = require('../services/OtpService');
 
 /**
  * Send WhatsApp OTP
@@ -12,15 +13,11 @@ exports.sendWhatsappOtp = async (req, res) => {
     }
 
     try {
-        const otp = WaApiService.generateOTP();
-        await WaApiService.storeOTP(phoneNumber, otp);
-
-        const response = await WaApiService.sendOTP(phoneNumber, otp);
+        await OtpService.generateAndSendOtp(phoneNumber);
 
         res.status(200).json({
             success: true,
-            message: 'OTP sent successfully via WhatsApp.',
-            waapiResponse: response
+            message: 'OTP sent successfully via WhatsApp.'
         });
     } catch (error) {
         console.error('Error in sendWhatsappOtp:', error);
@@ -44,10 +41,11 @@ exports.verifyWhatsappOtp = async (req, res) => {
     }
 
     try {
-        await WaApiService.verifyOTP(phoneNumber, otp);
+        const customToken = await OtpService.verifyOtp(phoneNumber, otp);
         res.status(200).json({
             success: true,
-            message: 'OTP verified successfully.'
+            message: 'OTP verified successfully.',
+            token: customToken
         });
     } catch (error) {
         console.error('Error in verifyWhatsappOtp:', error);
