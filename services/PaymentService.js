@@ -12,7 +12,7 @@ class PaymentService {
 
         if (!planDoc.exists) throw new Error('Plan not found');
         const planData = planDoc.data();
-        const userData = userDoc.exists ? userDoc.data() : { name: 'User', email: 'no-email@rapidjob.com', phone: '0000000000' };
+        const userData = userDoc.exists ? userDoc.data() : { name: 'User', email: 'no-email@rapidjob.com', phone: '9999999999' };
 
         const amount = planData.price;
         const orderId = `ord_${uid.substring(0, 8)}_${Date.now()}`;
@@ -25,6 +25,7 @@ class PaymentService {
             createdAt: admin.firestore.FieldValue.serverTimestamp()
         });
 
+        // Correct Cashfree PGCreateOrder Request Structure
         const request = {
             order_amount: amount,
             order_currency: 'INR',
@@ -33,14 +34,12 @@ class PaymentService {
                 customer_id: uid,
                 customer_name: userData.name || 'User',
                 customer_email: userData.email || 'no-email@rapidjob.com',
-                customer_phone: userData.phone || '0000000000'
-            },
-            order_meta: {
-                notify_url: 'https://rapidjob-backend-u7qr.onrender.com/api/payment/webhook',
+                customer_phone: userData.phone || '9999999999'
             }
         };
 
         try {
+            console.log("[CASHFREE_SENDING_REQUEST]", JSON.stringify(request));
             const response = await Cashfree.PGCreateOrder('2023-08-01', request);
             console.log(`[CASHFREE_ORDER_CREATED] OrderID: ${orderId}`);
             return response.data;
@@ -51,8 +50,6 @@ class PaymentService {
     }
 
     verifyWebhookSignature(signature, rawBody) {
-        // The SDK's PGVerifyWebhookSignature expects the body as a string.
-        // If rawBody is a Buffer, we convert it.
         const bodyString = Buffer.isBuffer(rawBody) ? rawBody.toString('utf-8') : String(rawBody);
 
         console.log('[CASHFREE_VERIFY_DEBUG]', {

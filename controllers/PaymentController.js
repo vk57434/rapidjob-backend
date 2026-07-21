@@ -3,20 +3,34 @@ const { db } = require('../firebase-admin');
 
 class PaymentController {
     async createOrder(req, res) {
+        console.log("CREATE_ORDER_STARTED");
+        console.log("Request Body:", req.body);
+        console.log("User:", req.user);
+
         const { planId } = req.body;
         const uid = req.user.uid;
         const role = req.user.role;
 
         try {
+            console.log("Calling Cashfree Service...");
             const order = await PaymentService.createOrder(uid, planId, role);
-            res.json({
+            console.log("Cashfree Service Response:", order);
+
+            const responseData = {
                 success: true,
                 order_id: order.order_id,
                 payment_session_id: order.payment_session_id
-            });
+            };
+
+            console.log("Sending Response To Android:", responseData);
+            res.json(responseData);
         } catch (error) {
             console.error('[CASHFREE_ERROR] Create Order:', error);
-            res.status(500).json({ success: false, message: error.message });
+            res.status(500).json({
+                success: false,
+                message: error.message,
+                stack: error.stack
+            });
         }
     }
 
