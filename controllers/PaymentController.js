@@ -26,14 +26,20 @@ class PaymentController {
         const rawBody = req.body; // Buffer (due to express.raw)
 
         console.log('[CASHFREE_WEBHOOK_RECEIVED]', {
-            signature: !!signature,
-            timestamp: !!timestamp,
+            headers: req.headers,
             isBuffer: Buffer.isBuffer(rawBody),
             bodyLength: rawBody?.length
         });
 
+        // 1. Detect Cashfree Dashboard Connectivity Test (no headers)
+        if (!signature && !timestamp) {
+            console.log('[CASHFREE_WEBHOOK] Dashboard validation request received.');
+            return res.status(200).send('OK (Connectivity Test)');
+        }
+
+        // 2. Validate Production Webhook Headers
         if (!signature || !timestamp) {
-            console.error('[CASHFREE_ERROR] Missing headers');
+            console.error('[CASHFREE_ERROR] Missing production headers');
             return res.status(400).send('Missing headers');
         }
 
@@ -43,7 +49,8 @@ class PaymentController {
         }
 
         try {
-            const isValid = PaymentService.verifyWebhookSignature(signature, rawBody);
+            // Official SDK verification
+            const isValid = PaymentService.verifyWebhookSignature(signature, rawBody.toString('utf-8'));
 
             if (!isValid) {
                 console.error('[CASHFREE_ERROR] Invalid Signature');
