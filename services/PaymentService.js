@@ -1,177 +1,105 @@
-const razorpay = require('../config/razorpay');
+const cashfree = require('../config/cashfree');
 const crypto = require('crypto');
 const { rtdb, db, admin } = require('../firebase-admin');
 
 class PaymentService {
-    async createOrder(amount, currency = 'INR', receipt, planId) {
-        console.log('PAYMENT START');
+    async createOrder(uid, planId, userRole) {
+        console.log(`[CASHFREE_ORDER_START] UID: ${uid}, Plan: ${planId}`);
         
-        if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
-            throw new Error('Razorpay credentials missing');
-        }
+        // 1. Fetch Plan from Firestore
+        const planDoc = await db.collection('plans').doc(planId).get();
+        if (!planDoc.exists) throw new Error('Plan not found');
+        const planData = planDoc.data();
+        const amount = planData.price;
 
-        const options = {
-            amount: Math.round(amount),
-            currency,
-            receipt,
-            notes: { planId }
+        // 2. Create Order
+        const request = {
+            order_amount: amount,
+            order_currency: 'INR',
+            order_id: `ord_${uid.substring(0, 8)}_${Date.now()}`,
+            customer_details: {
+                customer_id: uid,
+            },
+            order_meta: {
+                notify_url: 'https://rapidjob-backend-u7qr.onrender.com/api/payment/webhook',
+            },
+            order_note: JSON.stringify({ uid, planId, role: userRole, planName: planData.name })
         };
 
         try {
-            const order = await razorpay.orders.create(options);
-            console.log('ORDER CREATED:', order.id);
-            return order;
+            const response = await cashfree.PGCreateOrder('2023-08-01', request);
+            return response.data;
         } catch (error) {
-            console.error('FAILED: Razorpay Order Creation', error);
-            // Include Razorpay specific error details if available
-            const errorMsg = error.error ? error.error.description : error.message;
-            throw new Error(`Razorpay Error: ${errorMsg}`);
+            console.error('[CASHFREE_ORDER_FAIL]', error.response?.data || error.message);
+            throw new Error('Cashfree Order creation failed');
         }
     }
 
-    verifySignature(orderId, paymentId, signature) {
-        console.log(`[SIGNATURE_CHECK] Order: ${orderId}, Payment: ${paymentId}`);
-        const generatedSignature = crypto
-            .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
-            .update(`${orderId}|${paymentId}`)
-            .digest('hex');
-
-        console.log(`[SIGNATURE_COMPARE] Generated: ${generatedSignature.substring(0, 10)}..., Received: ${signature.substring(0, 10)}...`);
-        return generatedSignature === signature;
+    verifyWebhookSignature(signature, body) {
+        // CF-Signature is sent in header, body is the raw request body
+        const secret = process.env.CASHFREE_CLIENT_SECRET;
+        const expectedSignature = crypto
+            .createHmac('sha256', secret)
+            .update(JSON.stringify(body))
+            .digest('base64');
+        return signature === expectedSignature;
     }
 
-    async getPaymentDetails(paymentId) {
-        try {
-            const payment = await razorpay.payments.fetch(paymentId);
-            return payment;
-        } catch (error) {
-            console.error('FAILED: Fetching Payment Details', error);
-            throw error;
-        }
+    async getPaymentStatus(orderId) {
+        const response = await cashfree.PGOrderFetchPayments('2023-08-01', orderId);
+        return response.data;
     }
 
-    /**
-     * LOAD PLAN DETAILS FROM FIRESTORE (REPLACED HARDCODED LOGIC)
-     * Fetches the source of truth for subscription parameters directly from Firestore.
-     */
-    async getPlanDetails(planId) {
-        console.log(`[FIRESTORE_PLAN_LOOKUP_START] ID: ${planId}`);
-        const planPath = `plans/${planId}`;
+    async activateSubscription(uid, planId, paymentDetails) {
+        // Fetch Plan from Firestore
+        const planDoc = await db.collection('plans').doc(planId).get();
+        if (!planDoc.exists) throw new Error('Plan not found');
+        const planData = planDoc.data();
 
-        try {
-            // Fetch Plan Document
-            const planDoc = await db.collection('plans').doc(planId).get();
-
-            console.log(`[FIRESTORE_PLAN_LOOKUP_RESULT] Path: ${planPath}, Exists: ${planDoc.exists}`);
-
-            if (!planDoc.exists) {
-                console.error(`[PLAN_NOT_FOUND] Firestore document missing at: ${planPath}`);
-                return null;
-            }
-
-            const data = planDoc.data();
-            console.log(`[PLAN_DATA_LOADED]`, JSON.stringify(data));
-
-            // Map Firestore data to service-compatible format
-            // category helps determine if it's a RECRUITER or JOB_SEEKER plan
-            const category = (data.category || '').toUpperCase();
-            const maxJobPosts = parseInt(data.maxJobPosts) || 0;
-
-            return {
-                planName: data.name || 'Unknown Plan',
-                durationDays: parseInt(data.durationDays) || 30,
-                maxJobPosts: maxJobPosts,
-                isRecruiter: maxJobPosts > 0 || category === 'RECRUITER' || category === 'DASHBOARD',
-                price: data.price,
-                gst: data.gst
-            };
-        } catch (error) {
-            console.error(`[FIRESTORE_PLAN_ERROR] Error fetching ${planPath}:`, error.message);
-            throw error;
-        }
-    }
-
-    async getActiveSubscription(uid) {
-        const snapshot = await rtdb.ref(`subscriptions/${uid}`).once('value');
-        if (snapshot.exists()) {
-            const sub = snapshot.val();
-            const now = Date.now();
-            if (sub.status === 'ACTIVE' && sub.expiryDate > now) {
-                return sub;
-            }
-        }
-        return null;
-    }
-
-    async activateSubscription(uid, planId, planDetails, paymentDetails, role) {
         const now = Date.now();
-        const expiry = now + (planDetails.durationDays * 24 * 60 * 60 * 1000);
+        const expiry = now + (planData.durationDays * 24 * 60 * 60 * 1000);
 
         const subData = {
             userId: uid,
             planId: planId,
-            planName: planDetails.planName,
+            planName: planData.name,
             status: 'ACTIVE',
-            remainingJobs: planDetails.maxJobPosts,
-            jobsLimit: planDetails.maxJobPosts,
+            remainingJobs: planData.maxJobPosts || 0,
+            jobsLimit: planData.maxJobPosts || 0,
             expiryDate: expiry,
             purchaseDate: now,
-            updatedAt: now,
-            paymentId: paymentDetails.id,
-            paymentGateway: 'razorpay',
+            paymentId: paymentDetails.cf_payment_id,
+            paymentGateway: 'CASHFREE',
             active: true
         };
 
-        // 1. Update RTDB - Source of Truth
+        // 1. Update RTDB
         await rtdb.ref(`subscriptions/${uid}`).set(subData);
-        console.log('[RTDB_UPDATED] OK');
 
-        // 2. Update Firestore Subscription Copy (Used by UI and Security Rules)
-        const firestoreSubData = {
-            userId: uid,
-            planId: planId,
-            planName: planDetails.planName,
-            status: 'ACTIVE',
-            remainingJobs: planDetails.maxJobPosts,
+        // 2. Update Firestore
+        const isRecruiter = planData.maxJobPosts > 0;
+        const collection = isRecruiter ? 'subscriptions' : 'jobSeekerSubscriptions';
+        await db.collection(collection).doc(uid).set({
+            ...subData,
             expiryAt: admin.firestore.Timestamp.fromMillis(expiry),
             updatedAt: admin.firestore.FieldValue.serverTimestamp()
-        };
+        }, { merge: true });
 
-        // Determine collection based on explicit role OR plan logic (Fallback)
-        let collection = 'subscriptions'; // Default for recruiters
-        if (role) {
-            collection = (role === 'RECRUITER') ? 'subscriptions' : 'jobSeekerSubscriptions';
-        } else {
-            collection = planDetails.isRecruiter ? 'subscriptions' : 'jobSeekerSubscriptions';
-        }
-
-        await db.collection(collection).doc(uid).set(firestoreSubData, { merge: true });
-        console.log(`[FIRESTORE_UPDATED] Collection: ${collection}, UID: ${uid}`);
-
-        // 3. Save Payment History
-        const paymentRecord = {
-            id: paymentDetails.id,
-            paymentId: paymentDetails.id,
+        // 3. Save History
+        await db.collection('payments').doc(paymentDetails.cf_payment_id).set({
+            id: paymentDetails.cf_payment_id,
             orderId: paymentDetails.order_id,
             userId: uid,
-            amount: paymentDetails.amount / 100,
-            currency: paymentDetails.currency,
+            amount: paymentDetails.order_amount,
+            currency: 'INR',
             planId,
-            planName: planDetails.planName,
-            gateway: 'razorpay',
+            planName: planData.name,
+            gateway: 'CASHFREE',
             status: 'SUCCESS',
             timestamp: admin.firestore.FieldValue.serverTimestamp()
-        };
-
-        await db.collection('payments').doc(paymentDetails.id).set(paymentRecord);
-        console.log('[PAYMENT_HISTORY_SAVED] OK');
+        });
 
         return subData;
-    }
-
-    async isPaymentAlreadyUsed(paymentId) {
-        const doc = await db.collection('payments').doc(paymentId).get();
-        return doc.exists;
     }
 }
 
