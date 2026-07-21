@@ -21,8 +21,17 @@ class PaymentController {
                 keyId: process.env.RAZORPAY_KEY_ID
             });
         } catch (error) {
-            console.error('FAILED: createOrder', error.message);
-            res.status(500).json({ success: false, message: '500 Internal Error' });
+            console.error('FAILED: createOrder', error);
+            const detailedError = error.message || 'Unknown Order Creation Error';
+            res.status(500).json({
+                success: false,
+                message: detailedError,
+                debug: {
+                    receivedAmount: req.body.amount,
+                    receivedPlanId: req.body.planId,
+                    errorStack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+                }
+            });
         }
     }
 

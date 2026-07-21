@@ -23,7 +23,9 @@ class PaymentService {
             return order;
         } catch (error) {
             console.error('FAILED: Razorpay Order Creation', error);
-            throw error;
+            // Include Razorpay specific error details if available
+            const errorMsg = error.error ? error.error.description : error.message;
+            throw new Error(`Razorpay Error: ${errorMsg}`);
         }
     }
 
