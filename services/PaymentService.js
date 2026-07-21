@@ -1,4 +1,4 @@
-const Cashfree = require('../config/cashfree');
+const { Cashfree } = require('cashfree-pg');
 const { rtdb, db, admin } = require('../firebase-admin');
 
 class PaymentService {
@@ -14,7 +14,7 @@ class PaymentService {
         const planData = planDoc.data();
         const userData = userDoc.exists ? userDoc.data() : { name: 'User', email: 'no-email@rapidjob.com', phone: '9999999999' };
 
-        const amount = planData.price;
+        const amount = parseFloat(planData.price);
         const orderId = `ord_${uid.substring(0, 8)}_${Date.now()}`;
 
         await db.collection('order_metadata').doc(orderId).set({
@@ -25,40 +25,43 @@ class PaymentService {
             createdAt: admin.firestore.FieldValue.serverTimestamp()
         });
 
-        // Correct Cashfree PGCreateOrder Request Structure
-        const request = {
+        // Initialize Cashfree instance correctly
+        const cashfree = new Cashfree();
+        cashfree.XClientId = process.env.CASHFREE_CLIENT_ID;
+        cashfree.XClientSecret = process.env.CASHFREE_CLIENT_SECRET;
+        cashfree.XEnvironment = process.env.CASHFREE_ENV === 'PRODUCTION' ? Cashfree.CFEnvironment.PRODUCTION : Cashfree.CFEnvironment.SANDBOX;
+
+        // Correct Cashfree CreateOrderRequest structure
+        const createOrderRequest = {
             order_amount: amount,
             order_currency: 'INR',
             order_id: orderId,
             customer_details: {
                 customer_id: uid,
-                customer_name: userData.name || 'User',
+                customer_name: (userData.name || 'User').substring(0, 30),
                 customer_email: userData.email || 'no-email@rapidjob.com',
-                customer_phone: userData.phone || '9999999999'
+                customer_phone: (userData.phone || '9999999999').toString()
             }
         };
 
         try {
-            console.log("[CASHFREE_SENDING_REQUEST]", JSON.stringify(request));
-            const response = await Cashfree.PGCreateOrder('2023-08-01', request);
+            console.log("[CASHFREE_SENDING_REQUEST]", JSON.stringify(createOrderRequest));
+            // In Cashfree PG SDK v6.0.4, the method is PGCreateOrder(apiVersion, request)
+            const response = await cashfree.PGCreateOrder('2023-08-01', createOrderRequest);
             console.log(`[CASHFREE_ORDER_CREATED] OrderID: ${orderId}`);
             return response.data;
         } catch (error) {
             console.error('[CASHFREE_ERROR]', error.response?.data || error.message);
-            throw new Error('Cashfree Order creation failed');
+            throw new Error(`Cashfree Order creation failed: ${error.response?.data?.message || error.message}`);
         }
     }
 
     verifyWebhookSignature(signature, rawBody) {
         const bodyString = Buffer.isBuffer(rawBody) ? rawBody.toString('utf-8') : String(rawBody);
 
-        console.log('[CASHFREE_VERIFY_DEBUG]', {
-            isBuffer: Buffer.isBuffer(rawBody),
-            bodyType: typeof rawBody,
-            bodyLength: rawBody.length
-        });
-
         try {
+            // Note: Verify if your specific SDK version needs a specific class for verification
+            // The method name PGVerifyWebhookSignature might also need the Cashfree instance
             return Cashfree.PGVerifyWebhookSignature(bodyString, signature, process.env.CASHFREE_WEBHOOK_SECRET);
         } catch (error) {
             console.error('[CASHFREE_SDK_VERIFY_ERROR]', error);
@@ -67,7 +70,12 @@ class PaymentService {
     }
 
     async getPaymentStatus(orderId) {
-        const response = await Cashfree.PGOrderFetchPayments('2023-08-01', orderId);
+        const cashfree = new Cashfree();
+        cashfree.XClientId = process.env.CASHFREE_CLIENT_ID;
+        cashfree.XClientSecret = process.env.CASHFREE_CLIENT_SECRET;
+        cashfree.XEnvironment = process.env.CASHFREE_ENV === 'PRODUCTION' ? Cashfree.CFEnvironment.PRODUCTION : Cashfree.CFEnvironment.SANDBOX;
+
+        const response = await cashfree.PGOrderFetchPayments('2023-08-01', orderId);
         return response.data;
     }
 
