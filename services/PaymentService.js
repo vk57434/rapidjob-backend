@@ -1,5 +1,14 @@
-const { Cashfree } = require('cashfree-pg');
+const { Cashfree, CFEnvironment } = require('cashfree-pg');
 const { rtdb, db, admin } = require('../firebase-admin');
+
+// Configure SDK correctly
+Cashfree.XClientId = process.env.CASHFREE_CLIENT_ID;
+Cashfree.XClientSecret = process.env.CASHFREE_CLIENT_SECRET;
+Cashfree.XEnvironment = process.env.CASHFREE_ENV === 'PRODUCTION'
+    ? CFEnvironment.PRODUCTION
+    : CFEnvironment.SANDBOX;
+
+const cashfree = new Cashfree();
 
 class PaymentService {
     async createOrder(uid, planId, userRole) {
@@ -25,14 +34,7 @@ class PaymentService {
             createdAt: admin.firestore.FieldValue.serverTimestamp()
         });
 
-        // Initialize Cashfree instance correctly
-        const cashfree = new Cashfree();
-        cashfree.XClientId = process.env.CASHFREE_CLIENT_ID;
-        cashfree.XClientSecret = process.env.CASHFREE_CLIENT_SECRET;
-        cashfree.XEnvironment = process.env.CASHFREE_ENV === 'PRODUCTION' ? Cashfree.CFEnvironment.PRODUCTION : Cashfree.CFEnvironment.SANDBOX;
-
-        // Correct Cashfree CreateOrderRequest structure
-        const createOrderRequest = {
+        const requestBody = {
             order_amount: amount,
             order_currency: 'INR',
             order_id: orderId,
@@ -45,40 +47,35 @@ class PaymentService {
         };
 
         try {
-            console.log("[CASHFREE_SENDING_REQUEST]", JSON.stringify(createOrderRequest));
-            // In Cashfree PG SDK v6.0.4, the method is PGCreateOrder(apiVersion, request)
-            const response = await cashfree.PGCreateOrder('2023-08-01', createOrderRequest);
-            console.log(`[CASHFREE_ORDER_CREATED] OrderID: ${orderId}`);
+            console.log("Request:", requestBody);
+            // Cashfree PG SDK v6.x uses cashfree instance for methods
+            const response = await cashfree.PGCreateOrder('2023-08-01', requestBody);
+            console.log("Response:", response.data);
             return response.data;
         } catch (error) {
-            console.error('[CASHFREE_ERROR]', error.response?.data || error.message);
+            console.error("Status:", error.response?.status);
+            console.error("Data:", error.response?.data);
+            console.error("Stack:", error.stack);
             throw new Error(`Cashfree Order creation failed: ${error.response?.data?.message || error.message}`);
         }
     }
 
     verifyWebhookSignature(signature, rawBody) {
         const bodyString = Buffer.isBuffer(rawBody) ? rawBody.toString('utf-8') : String(rawBody);
-
         try {
-            // Note: Verify if your specific SDK version needs a specific class for verification
-            // The method name PGVerifyWebhookSignature might also need the Cashfree instance
             return Cashfree.PGVerifyWebhookSignature(bodyString, signature, process.env.CASHFREE_WEBHOOK_SECRET);
         } catch (error) {
-            console.error('[CASHFREE_SDK_VERIFY_ERROR]', error);
+            console.error('Webhook error:', error);
             return false;
         }
     }
 
     async getPaymentStatus(orderId) {
-        const cashfree = new Cashfree();
-        cashfree.XClientId = process.env.CASHFREE_CLIENT_ID;
-        cashfree.XClientSecret = process.env.CASHFREE_CLIENT_SECRET;
-        cashfree.XEnvironment = process.env.CASHFREE_ENV === 'PRODUCTION' ? Cashfree.CFEnvironment.PRODUCTION : Cashfree.CFEnvironment.SANDBOX;
-
         const response = await cashfree.PGOrderFetchPayments('2023-08-01', orderId);
         return response.data;
     }
 
+    // ... rest of activateSubscription/isPaymentAlreadyUsed remain unchanged
     async activateSubscription(uid, planId, paymentDetails) {
         const planDoc = await db.collection('plans').doc(planId).get();
         if (!planDoc.exists) throw new Error('Plan not found');
