@@ -1,16 +1,26 @@
-const { Cashfree, CFEnvironment } = require('cashfree-pg');
+const axios = require('axios');
+const crypto = require('crypto');
 const { rtdb, db, admin } = require('../firebase-admin');
 
-// Configure SDK correctly
-Cashfree.XClientId = process.env.CASHFREE_CLIENT_ID;
-Cashfree.XClientSecret = process.env.CASHFREE_CLIENT_SECRET;
-Cashfree.XEnvironment = process.env.CASHFREE_ENV === 'PRODUCTION'
-    ? CFEnvironment.PRODUCTION
-    : CFEnvironment.SANDBOX;
-
-const cashfree = new Cashfree();
+const CASHFREE_BASE_URL = process.env.CASHFREE_ENV === 'PRODUCTION'
+    ? 'https://api.cashfree.com/pg'
+    : 'https://sandbox.cashfree.com/pg';
 
 class PaymentService {
+    constructor() {
+        this.clientId = process.env.CASHFREE_CLIENT_ID;
+        this.clientSecret = process.env.CASHFREE_CLIENT_SECRET;
+    }
+
+    getHeaders() {
+        return {
+            'x-client-id': this.clientId,
+            'x-client-secret': this.clientSecret,
+            'x-api-version': '2023-08-01',
+            'Content-Type': 'application/json'
+        };
+    }
+
     async createOrder(uid, planId, userRole) {
         console.log(`[CASHFREE_ORDER_START] UID: ${uid}, Plan: ${planId}`);
         
@@ -47,35 +57,57 @@ class PaymentService {
         };
 
         try {
-            console.log("Request:", requestBody);
-            // Cashfree PG SDK v6.x uses cashfree instance for methods
-            const response = await cashfree.PGCreateOrder('2023-08-01', requestBody);
-            console.log("Response:", response.data);
+            console.log("[CASHFREE_REQUEST] URL:", `${CASHFREE_BASE_URL}/orders`);
+            console.log("[CASHFREE_REQUEST] Body:", JSON.stringify(requestBody));
+
+            const response = await axios.post(`${CASHFREE_BASE_URL}/orders`, requestBody, {
+                headers: this.getHeaders()
+            });
+
+            console.log("[CASHFREE_RESPONSE] Status:", response.status);
+            console.log("[CASHFREE_RESPONSE] Data:", JSON.stringify(response.data));
+
             return response.data;
         } catch (error) {
-            console.error("Status:", error.response?.status);
-            console.error("Data:", error.response?.data);
-            console.error("Stack:", error.stack);
-            throw new Error(`Cashfree Order creation failed: ${error.response?.data?.message || error.message}`);
+            console.error("[CASHFREE_ERROR] Status:", error.response?.status);
+            console.error("[CASHFREE_ERROR] Data:", error.response?.data);
+            console.error("[CASHFREE_ERROR] Stack:", error.stack);
+
+            const errMsg = error.response?.data?.message || error.message;
+            throw new Error(`Cashfree Order creation failed: ${errMsg}`);
         }
     }
 
-    verifyWebhookSignature(signature, rawBody) {
-        const bodyString = Buffer.isBuffer(rawBody) ? rawBody.toString('utf-8') : String(rawBody);
+    verifyWebhookSignature(signature, rawBody, timestamp) {
         try {
-            return Cashfree.PGVerifyWebhookSignature(bodyString, signature, process.env.CASHFREE_WEBHOOK_SECRET);
+            // Cashfree Webhook Verification (v2023-08-01)
+            // The signature is HMAC-SHA256 of (timestamp + rawBody)
+            const secret = process.env.CASHFREE_WEBHOOK_SECRET || this.clientSecret;
+            const data = timestamp + rawBody;
+            const expectedSignature = crypto
+                .createHmac('sha256', secret)
+                .update(data)
+                .digest('base64');
+
+            return expectedSignature === signature;
         } catch (error) {
-            console.error('Webhook error:', error);
+            console.error('[CASHFREE_WEBHOOK_VERIFY_ERROR]', error);
             return false;
         }
     }
 
     async getPaymentStatus(orderId) {
-        const response = await cashfree.PGOrderFetchPayments('2023-08-01', orderId);
-        return response.data;
+        try {
+            const response = await axios.get(`${CASHFREE_BASE_URL}/orders/${orderId}/payments`, {
+                headers: this.getHeaders()
+            });
+            return response.data;
+        } catch (error) {
+            console.error("[CASHFREE_STATUS_ERROR]", error.response?.data || error.message);
+            throw new Error('Failed to fetch payment status');
+        }
     }
 
-    // ... rest of activateSubscription/isPaymentAlreadyUsed remain unchanged
     async activateSubscription(uid, planId, paymentDetails) {
         const planDoc = await db.collection('plans').doc(planId).get();
         if (!planDoc.exists) throw new Error('Plan not found');

@@ -16,6 +16,7 @@ class PaymentController {
             const order = await PaymentService.createOrder(uid, planId, role);
             console.log("Cashfree Service Response:", order);
 
+            // Maintain Android response format
             const responseData = {
                 success: true,
                 order_id: order.order_id,
@@ -63,8 +64,8 @@ class PaymentController {
         }
 
         try {
-            // Official SDK verification
-            const isValid = PaymentService.verifyWebhookSignature(signature, rawBody.toString('utf-8'));
+            // Manual verification (v2023-08-01 format)
+            const isValid = PaymentService.verifyWebhookSignature(signature, rawBody.toString('utf-8'), timestamp);
 
             if (!isValid) {
                 console.error('[CASHFREE_ERROR] Invalid Signature');
