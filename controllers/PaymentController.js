@@ -22,49 +22,62 @@ class PaymentController {
 
     async webhook(req, res) {
         const signature = req.headers['x-cf-signature'];
-        const rawBody = req.body.toString();
+        const timestamp = req.headers['x-cf-timestamp'];
+        const rawBody = req.body; // Buffer (due to express.raw)
 
-        console.log('[CASHFREE_WEBHOOK_RECEIVED]');
+        console.log('[CASHFREE_WEBHOOK_RECEIVED]', {
+            signature: !!signature,
+            timestamp: !!timestamp,
+            isBuffer: Buffer.isBuffer(rawBody),
+            bodyLength: rawBody?.length
+        });
 
-        if (!PaymentService.verifyWebhookSignature(signature, rawBody)) {
-            console.error('[CASHFREE_ERROR] Invalid Signature');
-            return res.status(403).send('Invalid Signature');
+        if (!signature || !timestamp) {
+            console.error('[CASHFREE_ERROR] Missing headers');
+            return res.status(400).send('Missing headers');
         }
-        console.log('[CASHFREE_SIGNATURE_VALID]');
 
-        const body = JSON.parse(rawBody);
+        if (!rawBody || rawBody.length === 0) {
+            console.error('[CASHFREE_ERROR] Empty request body');
+            return res.status(400).send('Empty body');
+        }
 
-        if (body.data?.event === 'PAYMENT_SUCCESS_WEBHOOK') {
-            const payment = body.data.payment;
-            const order = body.data.order;
+        try {
+            const isValid = PaymentService.verifyWebhookSignature(signature, rawBody);
 
-            try {
-                // Verify payment status officially
-                if (payment.payment_status !== 'SUCCESS') {
-                    return res.status(200).send('Ignored non-success status');
-                }
+            if (!isValid) {
+                console.error('[CASHFREE_ERROR] Invalid Signature');
+                return res.status(400).send('Invalid Signature');
+            }
+            console.log('[CASHFREE_SIGNATURE_VALID]');
 
-                // Get metadata from db
-                const metaDoc = await db.collection('order_metadata').doc(order.order_id).get();
-                if (!metaDoc.exists) throw new Error('Order metadata not found');
-                const meta = metaDoc.data();
+            const body = JSON.parse(rawBody.toString('utf-8'));
+
+            if (body.data?.event === 'PAYMENT_SUCCESS_WEBHOOK') {
+                const payment = body.data.payment;
+                const order = body.data.order;
 
                 // Idempotency
                 const isProcessed = await PaymentService.isPaymentAlreadyUsed(payment.cf_payment_id);
                 if (isProcessed) {
-                    console.warn('[CASHFREE_DUPLICATE_WEBHOOK]');
+                    console.warn('[CASHFREE_DUPLICATE_WEBHOOK]', payment.cf_payment_id);
                     return res.status(200).send('Already processed');
                 }
 
-                await PaymentService.activateSubscription(meta.uid, meta.planId, payment);
-                console.log('[CASHFREE_PAYMENT_VERIFIED]');
-            } catch (err) {
-                console.error('[CASHFREE_ERROR] Webhook processing:', err);
-                return res.status(500).send('Internal Error');
-            }
-        }
+                // Metadata lookup
+                const metaDoc = await db.collection('order_metadata').doc(order.order_id).get();
+                if (!metaDoc.exists) throw new Error('Order metadata not found');
+                const meta = metaDoc.data();
 
-        res.status(200).send('OK');
+                await PaymentService.activateSubscription(meta.uid, meta.planId, payment);
+                console.log('[CASHFREE_PAYMENT_VERIFIED] Subscription activated');
+            }
+
+            res.status(200).send('OK');
+        } catch (err) {
+            console.error('[CASHFREE_ERROR] Webhook processing:', err);
+            res.status(500).send('Internal Error');
+        }
     }
 
     async getStatus(req, res) {

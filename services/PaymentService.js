@@ -5,7 +5,6 @@ class PaymentService {
     async createOrder(uid, planId, userRole) {
         console.log(`[CASHFREE_ORDER_START] UID: ${uid}, Plan: ${planId}`);
         
-        // 1. Fetch Plan & User Profile
         const [planDoc, userDoc] = await Promise.all([
             db.collection('plans').doc(planId).get(),
             db.collection('users').doc(uid).get()
@@ -18,7 +17,6 @@ class PaymentService {
         const amount = planData.price;
         const orderId = `ord_${uid.substring(0, 8)}_${Date.now()}`;
 
-        // 2. Persist Order Metadata (for webhook identification)
         await db.collection('order_metadata').doc(orderId).set({
             uid,
             planId,
@@ -27,7 +25,6 @@ class PaymentService {
             createdAt: admin.firestore.FieldValue.serverTimestamp()
         });
 
-        // 3. Create Cashfree Order
         const request = {
             order_amount: amount,
             order_currency: 'INR',
@@ -54,13 +51,26 @@ class PaymentService {
     }
 
     verifyWebhookSignature(signature, rawBody) {
-        // Use official Cashfree verification logic
-        return Cashfree.PGVerifyWebhookSignature(rawBody, signature, process.env.CASHFREE_WEBHOOK_SECRET);
+        // The SDK's PGVerifyWebhookSignature expects the body as a string.
+        // If rawBody is a Buffer, we convert it.
+        const bodyString = Buffer.isBuffer(rawBody) ? rawBody.toString('utf-8') : String(rawBody);
+
+        console.log('[CASHFREE_VERIFY_DEBUG]', {
+            isBuffer: Buffer.isBuffer(rawBody),
+            bodyType: typeof rawBody,
+            bodyLength: rawBody.length
+        });
+
+        try {
+            return Cashfree.PGVerifyWebhookSignature(bodyString, signature, process.env.CASHFREE_WEBHOOK_SECRET);
+        } catch (error) {
+            console.error('[CASHFREE_SDK_VERIFY_ERROR]', error);
+            return false;
+        }
     }
 
     async getPaymentStatus(orderId) {
         const response = await Cashfree.PGOrderFetchPayments('2023-08-01', orderId);
-        // Returns all payments for this order, we need to find the successful one
         return response.data;
     }
 
