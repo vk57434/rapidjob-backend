@@ -1,4 +1,4 @@
-const cashfree = require('../config/cashfree');
+const Cashfree = require('../config/cashfree');
 const crypto = require('crypto');
 const { rtdb, db, admin } = require('../firebase-admin');
 
@@ -6,13 +6,11 @@ class PaymentService {
     async createOrder(uid, planId, userRole) {
         console.log(`[CASHFREE_ORDER_START] UID: ${uid}, Plan: ${planId}`);
         
-        // 1. Fetch Plan from Firestore
         const planDoc = await db.collection('plans').doc(planId).get();
         if (!planDoc.exists) throw new Error('Plan not found');
         const planData = planDoc.data();
         const amount = planData.price;
 
-        // 2. Create Order
         const request = {
             order_amount: amount,
             order_currency: 'INR',
@@ -27,7 +25,7 @@ class PaymentService {
         };
 
         try {
-            const response = await cashfree.PGCreateOrder('2023-08-01', request);
+            const response = await Cashfree.PGCreateOrder('2023-08-01', request);
             return response.data;
         } catch (error) {
             console.error('[CASHFREE_ORDER_FAIL]', error.response?.data || error.message);
@@ -36,22 +34,20 @@ class PaymentService {
     }
 
     verifyWebhookSignature(signature, body) {
-        // CF-Signature is sent in header, body is the raw request body
         const secret = process.env.CASHFREE_CLIENT_SECRET;
         const expectedSignature = crypto
             .createHmac('sha256', secret)
-            .update(JSON.stringify(body))
+            .update(body)
             .digest('base64');
         return signature === expectedSignature;
     }
 
     async getPaymentStatus(orderId) {
-        const response = await cashfree.PGOrderFetchPayments('2023-08-01', orderId);
+        const response = await Cashfree.PGOrderFetchPayments('2023-08-01', orderId);
         return response.data;
     }
 
     async activateSubscription(uid, planId, paymentDetails) {
-        // Fetch Plan from Firestore
         const planDoc = await db.collection('plans').doc(planId).get();
         if (!planDoc.exists) throw new Error('Plan not found');
         const planData = planDoc.data();
@@ -73,10 +69,8 @@ class PaymentService {
             active: true
         };
 
-        // 1. Update RTDB
         await rtdb.ref(`subscriptions/${uid}`).set(subData);
 
-        // 2. Update Firestore
         const isRecruiter = planData.maxJobPosts > 0;
         const collection = isRecruiter ? 'subscriptions' : 'jobSeekerSubscriptions';
         await db.collection(collection).doc(uid).set({
@@ -85,7 +79,6 @@ class PaymentService {
             updatedAt: admin.firestore.FieldValue.serverTimestamp()
         }, { merge: true });
 
-        // 3. Save History
         await db.collection('payments').doc(paymentDetails.cf_payment_id).set({
             id: paymentDetails.cf_payment_id,
             orderId: paymentDetails.order_id,
@@ -100,6 +93,11 @@ class PaymentService {
         });
 
         return subData;
+    }
+
+    async isPaymentAlreadyUsed(paymentId) {
+        const doc = await db.collection('payments').doc(paymentId).get();
+        return doc.exists;
     }
 }
 
