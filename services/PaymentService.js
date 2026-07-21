@@ -10,6 +10,15 @@ class PaymentService {
     constructor() {
         this.clientId = process.env.CASHFREE_CLIENT_ID;
         this.clientSecret = process.env.CASHFREE_CLIENT_SECRET;
+
+        // Debugging environment variables (Masked)
+        console.log("[CASHFREE_INIT_DEBUG]", {
+            ENV: process.env.CASHFREE_ENV,
+            URL: CASHFREE_BASE_URL,
+            CLIENT_ID_SET: !!this.clientId,
+            CLIENT_SECRET_SET: !!this.clientSecret,
+            CLIENT_ID_START: this.clientId?.substring(0, 5)
+        });
     }
 
     getHeaders() {
@@ -57,21 +66,20 @@ class PaymentService {
         };
 
         try {
-            console.log("[CASHFREE_REQUEST] URL:", `${CASHFREE_BASE_URL}/orders`);
-            console.log("[CASHFREE_REQUEST] Body:", JSON.stringify(requestBody));
+            console.log("[CASHFREE_API_REQUEST] POST", `${CASHFREE_BASE_URL}/orders`);
+            console.log("[CASHFREE_API_BODY]", JSON.stringify(requestBody));
 
             const response = await axios.post(`${CASHFREE_BASE_URL}/orders`, requestBody, {
                 headers: this.getHeaders()
             });
 
-            console.log("[CASHFREE_RESPONSE] Status:", response.status);
-            console.log("[CASHFREE_RESPONSE] Data:", JSON.stringify(response.data));
+            console.log("[CASHFREE_API_RESPONSE] Status:", response.status);
+            console.log("[CASHFREE_API_DATA]", JSON.stringify(response.data));
 
             return response.data;
         } catch (error) {
-            console.error("[CASHFREE_ERROR] Status:", error.response?.status);
-            console.error("[CASHFREE_ERROR] Data:", error.response?.data);
-            console.error("[CASHFREE_ERROR] Stack:", error.stack);
+            console.error("[CASHFREE_API_ERROR] Status:", error.response?.status);
+            console.error("[CASHFREE_API_DATA]", JSON.stringify(error.response?.data));
 
             const errMsg = error.response?.data?.message || error.message;
             throw new Error(`Cashfree Order creation failed: ${errMsg}`);
@@ -80,8 +88,6 @@ class PaymentService {
 
     verifyWebhookSignature(signature, rawBody, timestamp) {
         try {
-            // Cashfree Webhook Verification (v2023-08-01)
-            // The signature is HMAC-SHA256 of (timestamp + rawBody)
             const secret = process.env.CASHFREE_WEBHOOK_SECRET || this.clientSecret;
             const data = timestamp + rawBody;
             const expectedSignature = crypto
