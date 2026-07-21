@@ -1,49 +1,66 @@
 const Cashfree = require('../config/cashfree');
-const crypto = require('crypto');
 const { rtdb, db, admin } = require('../firebase-admin');
 
 class PaymentService {
     async createOrder(uid, planId, userRole) {
         console.log(`[CASHFREE_ORDER_START] UID: ${uid}, Plan: ${planId}`);
         
-        const planDoc = await db.collection('plans').doc(planId).get();
+        // 1. Fetch Plan & User Profile
+        const [planDoc, userDoc] = await Promise.all([
+            db.collection('plans').doc(planId).get(),
+            db.collection('users').doc(uid).get()
+        ]);
+
         if (!planDoc.exists) throw new Error('Plan not found');
         const planData = planDoc.data();
-        const amount = planData.price;
+        const userData = userDoc.exists ? userDoc.data() : { name: 'User', email: 'no-email@rapidjob.com', phone: '0000000000' };
 
+        const amount = planData.price;
+        const orderId = `ord_${uid.substring(0, 8)}_${Date.now()}`;
+
+        // 2. Persist Order Metadata (for webhook identification)
+        await db.collection('order_metadata').doc(orderId).set({
+            uid,
+            planId,
+            role: userRole,
+            planName: planData.name,
+            createdAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        // 3. Create Cashfree Order
         const request = {
             order_amount: amount,
             order_currency: 'INR',
-            order_id: `ord_${uid.substring(0, 8)}_${Date.now()}`,
+            order_id: orderId,
             customer_details: {
                 customer_id: uid,
+                customer_name: userData.name || 'User',
+                customer_email: userData.email || 'no-email@rapidjob.com',
+                customer_phone: userData.phone || '0000000000'
             },
             order_meta: {
                 notify_url: 'https://rapidjob-backend-u7qr.onrender.com/api/payment/webhook',
-            },
-            order_note: JSON.stringify({ uid, planId, role: userRole, planName: planData.name })
+            }
         };
 
         try {
             const response = await Cashfree.PGCreateOrder('2023-08-01', request);
+            console.log(`[CASHFREE_ORDER_CREATED] OrderID: ${orderId}`);
             return response.data;
         } catch (error) {
-            console.error('[CASHFREE_ORDER_FAIL]', error.response?.data || error.message);
+            console.error('[CASHFREE_ERROR]', error.response?.data || error.message);
             throw new Error('Cashfree Order creation failed');
         }
     }
 
-    verifyWebhookSignature(signature, body) {
-        const secret = process.env.CASHFREE_CLIENT_SECRET;
-        const expectedSignature = crypto
-            .createHmac('sha256', secret)
-            .update(body)
-            .digest('base64');
-        return signature === expectedSignature;
+    verifyWebhookSignature(signature, rawBody) {
+        // Use official Cashfree verification logic
+        return Cashfree.PGVerifyWebhookSignature(rawBody, signature, process.env.CASHFREE_WEBHOOK_SECRET);
     }
 
     async getPaymentStatus(orderId) {
         const response = await Cashfree.PGOrderFetchPayments('2023-08-01', orderId);
+        // Returns all payments for this order, we need to find the successful one
         return response.data;
     }
 
@@ -92,6 +109,7 @@ class PaymentService {
             timestamp: admin.firestore.FieldValue.serverTimestamp()
         });
 
+        console.log(`[CASHFREE_SUBSCRIPTION_ACTIVATED] UID: ${uid}, Payment: ${paymentDetails.cf_payment_id}`);
         return subData;
     }
 

@@ -19,6 +19,9 @@ app.use(helmet());
 app.use(cors());
 app.use(morgan('dev'));
 app.use(compression());
+
+// Webhook needs raw body to verify signature
+app.use('/api/payment/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
