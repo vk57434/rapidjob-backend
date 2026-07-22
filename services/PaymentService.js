@@ -2,22 +2,19 @@ const axios = require('axios');
 const crypto = require('crypto');
 const { rtdb, db, admin } = require('../firebase-admin');
 
-const CASHFREE_BASE_URL = process.env.CASHFREE_ENV === 'PRODUCTION'
-    ? 'https://api.cashfree.com/pg'
-    : 'https://sandbox.cashfree.com/pg';
+const CASHFREE_BASE_URL = process.env.CASHFREE_BASE_URL || 'https://sandbox.cashfree.com/pg';
 
 class PaymentService {
     constructor() {
         this.clientId = process.env.CASHFREE_CLIENT_ID;
         this.clientSecret = process.env.CASHFREE_CLIENT_SECRET;
+        this.apiVersion = process.env.CASHFREE_API_VERSION || '2023-08-01';
 
-        // Debugging environment variables (Masked)
-        console.log("[CASHFREE_INIT_DEBUG]", {
+        console.log("[CASHFREE_INIT_SANDBOX]", {
             ENV: process.env.CASHFREE_ENV,
             URL: CASHFREE_BASE_URL,
-            CLIENT_ID_SET: !!this.clientId,
-            CLIENT_SECRET_SET: !!this.clientSecret,
-            CLIENT_ID_START: this.clientId?.substring(0, 5)
+            CLIENT_ID: this.clientId ? "SET" : "MISSING",
+            API_VERSION: this.apiVersion
         });
     }
 
@@ -25,7 +22,7 @@ class PaymentService {
         return {
             'x-client-id': this.clientId,
             'x-client-secret': this.clientSecret,
-            'x-api-version': '2023-08-01',
+            'x-api-version': this.apiVersion,
             'Content-Type': 'application/json'
         };
     }
@@ -91,7 +88,8 @@ class PaymentService {
 
     verifyWebhookSignature(signature, rawBody, timestamp) {
         try {
-            const secret = process.env.CASHFREE_WEBHOOK_SECRET || this.clientSecret;
+            // According to Cashfree v2023-08-01, the signature is a HMAC SHA256 of timestamp + rawBody using the clientSecret
+            const secret = this.clientSecret;
             const data = timestamp + rawBody;
             const expectedSignature = crypto
                 .createHmac('sha256', secret)
