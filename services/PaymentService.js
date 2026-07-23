@@ -116,13 +116,19 @@ class PaymentService {
         }
     }
 
-    async activateSubscription(uid, planId, paymentDetails) {
+    async activateSubscription(uid, planId, paymentDetails, userRole = null) {
+        console.log(`[CASHFREE_ACTIVATION] UID: ${uid}, Plan: ${planId}, Role: ${userRole}`);
+
         const planDoc = await db.collection('plans').doc(planId).get();
-        if (!planDoc.exists) throw new Error('Plan not found');
+        if (!planDoc.exists) {
+            console.error(`[CASHFREE_ERROR] Plan ${planId} not found in Firestore 'plans' collection`);
+            throw new Error('Plan not found');
+        }
         const planData = planDoc.data();
 
         const now = Date.now();
-        const expiry = now + (planData.durationDays * 24 * 60 * 60 * 1000);
+        const durationDays = planData.durationDays || planData.duration || 0;
+        const expiry = durationDays > 0 ? now + (durationDays * 24 * 60 * 60 * 1000) : 0;
 
         const subData = {
             userId: uid,
@@ -133,40 +139,56 @@ class PaymentService {
             jobsLimit: planData.maxJobPosts || 0,
             expiryDate: expiry,
             purchaseDate: now,
-            paymentId: paymentDetails.cf_payment_id,
+            paymentId: paymentDetails.cf_payment_id || paymentDetails.payment_id,
             paymentGateway: 'CASHFREE',
             active: true
         };
 
-        await rtdb.ref(`subscriptions/${uid}`).set(subData);
+        // 1. Update RTDB (Immediate Dashboard Sync)
+        await rtdb.ref(`subscriptions/${uid}`).set({
+            ...subData,
+            updatedAt: now
+        });
 
-        // Add to RTDB Payment History for Android app
-        await rtdb.ref(`payments/${uid}/${paymentDetails.cf_payment_id}`).set({
-            paymentId: paymentDetails.cf_payment_id,
-            transactionId: paymentDetails.cf_payment_id,
+        // 2. Update RTDB Payment History
+        await rtdb.ref(`payments/${uid}/${subData.paymentId}`).set({
+            paymentId: subData.paymentId,
+            transactionId: subData.paymentId,
             planId: planId,
             planName: planData.name,
             gateway: 'CASHFREE',
-            amount: paymentDetails.order_amount,
+            amount: paymentDetails.order_amount || paymentDetails.payment_amount,
             currency: 'INR',
             paymentStatus: 'SUCCESS',
             purchaseDate: now,
             expiryDate: expiry
         });
 
-        const isRecruiter = planData.maxJobPosts > 0;
-        const collection = isRecruiter ? 'subscriptions' : 'jobSeekerSubscriptions';
+        // 3. Update Firestore (Sync for Security Rules and Audit)
+        // Determine collection: check userRole first, then fallback to plan logic
+        let collection = 'subscriptions';
+        if (userRole === 'JOB_SEEKER') {
+            collection = 'jobSeekerSubscriptions';
+        } else if (!userRole) {
+            // Fallback logic if role is missing in metadata
+            const isRecruiter = (planData.maxJobPosts && planData.maxJobPosts > 0) || !planId.startsWith('seeker_');
+            collection = isRecruiter ? 'subscriptions' : 'jobSeekerSubscriptions';
+        }
+
+        console.log(`[CASHFREE_FIRESTORE_WRITE] Collection: ${collection}, UID: ${uid}`);
+
         await db.collection(collection).doc(uid).set({
             ...subData,
-            expiryAt: admin.firestore.Timestamp.fromMillis(expiry),
+            expiryAt: expiry > 0 ? admin.firestore.Timestamp.fromMillis(expiry) : null,
             updatedAt: admin.firestore.FieldValue.serverTimestamp()
         }, { merge: true });
 
-        await db.collection('payments').doc(paymentDetails.cf_payment_id).set({
-            id: paymentDetails.cf_payment_id,
+        // 4. Record Payment in Firestore
+        await db.collection('payments').doc(subData.paymentId).set({
+            id: subData.paymentId,
             orderId: paymentDetails.order_id,
             userId: uid,
-            amount: paymentDetails.order_amount,
+            amount: paymentDetails.order_amount || paymentDetails.payment_amount,
             currency: 'INR',
             planId,
             planName: planData.name,
@@ -175,7 +197,7 @@ class PaymentService {
             timestamp: admin.firestore.FieldValue.serverTimestamp()
         });
 
-        console.log(`[CASHFREE_SUBSCRIPTION_ACTIVATED] UID: ${uid}, Payment: ${paymentDetails.cf_payment_id}`);
+        console.log(`[CASHFREE_ACTIVATION_COMPLETE] UID: ${uid}`);
         return subData;
     }
 

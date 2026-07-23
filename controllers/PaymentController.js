@@ -91,7 +91,7 @@ class PaymentController {
                 if (!metaDoc.exists) throw new Error('Order metadata not found');
                 const meta = metaDoc.data();
 
-                await PaymentService.activateSubscription(meta.uid, meta.planId, payment);
+                await PaymentService.activateSubscription(meta.uid, meta.planId, payment, meta.role);
                 console.log('[CASHFREE_PAYMENT_VERIFIED] Subscription activated');
             }
 
