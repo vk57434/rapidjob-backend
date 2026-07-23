@@ -158,21 +158,60 @@ class PaymentService {
     // WEBHOOK & ACTIVATION
     // ─────────────────────────────────────────────────────────────────────────────
 
+    /**
+     * Verifies the webhook signature for Cashfree API v2023-08-01 (Production & Sandbox)
+     * Uses byte-perfect Buffer concatenation to ensure byte-perfect signature matching.
+     */
     verifyWebhookSignature(signature, rawBody, timestamp) {
         try {
-            if (!signature || !timestamp || !rawBody) return false;
-            const data = timestamp + rawBody;
+            if (!signature || !timestamp || !rawBody) {
+                console.error("[CASHFREE_SIGNATURE_ERROR] Missing signature, timestamp, or body");
+                return false;
+            }
+
+            // 1. Log verification start details (Production safe)
+            console.log("[CASHFREE_VERIFICATION_START]", {
+                timestamp,
+                isBuffer: Buffer.isBuffer(rawBody),
+                bodyLength: rawBody.length,
+                signaturePrefix: signature.substring(0, 8)
+            });
+
+            // 2. Implementation: HMAC-SHA256(timestamp + raw_body, secret_key)
+            // We use Buffers directly to avoid any encoding/whitespace issues during string conversion
+            const timestampBuffer = Buffer.from(timestamp, 'utf8');
+            const bodyBuffer = Buffer.isBuffer(rawBody) ? rawBody : Buffer.from(rawBody, 'utf8');
+
+            const data = Buffer.concat([timestampBuffer, bodyBuffer]);
+
             const expectedSignature = crypto
                 .createHmac('sha256', this.clientSecret)
                 .update(data)
                 .digest('base64');
 
-            const isValid = expectedSignature === signature;
+            // 3. Debug logging for comparison
+            console.log("[CASHFREE_SIGNATURE_COMPARISON]", {
+                received: signature,
+                calculated: expectedSignature
+            });
+
+            // 4. Timing-safe comparison to prevent side-channel attacks
+            const expectedBuffer = Buffer.from(expectedSignature, 'utf8');
+            const receivedBuffer = Buffer.from(signature, 'utf8');
+
+            if (expectedBuffer.length !== receivedBuffer.length) {
+                console.error("[CASHFREE_SIGNATURE_INVALID] Length mismatch");
+                return false;
+            }
+
+            const isValid = crypto.timingSafeEqual(expectedBuffer, receivedBuffer);
+
             if (isValid) {
                 console.log("[CASHFREE_SIGNATURE_VALID]");
             } else {
-                console.error("[CASHFREE_SIGNATURE_INVALID]");
+                console.error("[CASHFREE_SIGNATURE_INVALID] Content mismatch. Check Production Secret Key.");
             }
+
             return isValid;
         } catch (error) {
             console.error('[CASHFREE_WEBHOOK_VERIFY_ERROR]', error);

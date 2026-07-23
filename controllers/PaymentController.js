@@ -34,36 +34,39 @@ class PaymentController {
         // Support both latest and legacy Cashfree headers
         const signature = req.headers['x-webhook-signature'] || req.headers['x-cf-signature'];
         const timestamp = req.headers['x-webhook-timestamp'] || req.headers['x-cf-timestamp'];
-        const rawBody = req.body; // Buffer (due to express.raw in server.js)
+        const rawBody = req.body; // Expecting a Buffer from express.raw
 
         console.log('[CASHFREE_WEBHOOK_RECEIVED]', {
-            timestamp: timestamp,
-            hasSignature: !!signature
+            timestamp,
+            hasSignature: !!signature,
+            isBuffer: Buffer.isBuffer(rawBody),
+            bodyLength: rawBody?.length,
+            contentType: req.headers['content-type']
         });
 
-        // 1. Connectivity Test (Cashfree sends this to verify webhook endpoint)
+        // 1. Detect Cashfree Dashboard Connectivity Test (no headers)
         if (!signature && !timestamp) {
-            console.log('[CASHFREE_WEBHOOK] Dashboad connectivity test.');
+            console.log('[CASHFREE_WEBHOOK] Connectivity Test / Dashboard Validation.');
             return res.status(200).send('OK');
         }
 
-        if (!signature || !timestamp || !rawBody || rawBody.length === 0) {
-            console.error('[CASHFREE_WEBHOOK_ERROR] Missing headers or body');
-            return res.status(400).send('Invalid request');
+        if (!rawBody || rawBody.length === 0) {
+            console.error('[CASHFREE_WEBHOOK_ERROR] Empty request body');
+            return res.status(400).send('Empty body');
         }
 
         try {
-            // 2. Signature Verification
-            const isValid = PaymentService.verifyWebhookSignature(signature, rawBody.toString('utf-8'), timestamp);
+            // 2. Signature verification (passing the raw Buffer to the service)
+            const isValid = PaymentService.verifyWebhookSignature(signature, rawBody, timestamp);
+
             if (!isValid) {
                 return res.status(400).send('Invalid Signature');
             }
 
-            const payload = JSON.parse(rawBody.toString('utf-8'));
-            const eventType = payload.type || payload.data?.event;
+            const body = JSON.parse(rawBody.toString('utf-8'));
+            const eventType = body.type || body.data?.event;
             console.log(`[CASHFREE_EVENT] ${eventType}`);
 
-            // 3. Process Successful Payment
             if (eventType === 'PAYMENT_SUCCESS_WEBHOOK' || eventType === 'payment.success') {
                 const payment = payload.data.payment;
                 const order = payload.data.order;
