@@ -3,116 +3,139 @@ const { db } = require('../firebase-admin');
 
 class PaymentController {
     async createOrder(req, res) {
-        console.log("CREATE_ORDER_STARTED");
-        console.log("Request Body:", req.body);
-        console.log("User:", req.user);
-
+        console.log("[CASHFREE_CREATE_ORDER_API] Started");
         const { planId } = req.body;
         const uid = req.user.uid;
         const role = req.user.role;
 
-        try {
-            console.log("Calling Cashfree Service...");
-            const order = await PaymentService.createOrder(uid, planId, role);
-            console.log("Cashfree Service Response:", order);
+        if (!planId) {
+            return res.status(400).json({ success: false, message: "planId is required" });
+        }
 
-            // Maintain Android response format
-            const responseData = {
+        try {
+            const order = await PaymentService.createOrder(uid, planId, role);
+
+            // Response format for Android SDK compatibility
+            res.json({
                 success: true,
                 order_id: order.order_id,
                 payment_session_id: order.payment_session_id
-            };
-
-            console.log("Sending Response To Android:", responseData);
-            res.json(responseData);
+            });
         } catch (error) {
-            console.error('[CASHFREE_ERROR] Create Order:', error);
+            console.error('[CASHFREE_API_ERROR] Create Order:', error);
             res.status(500).json({
                 success: false,
-                message: error.message,
-                stack: error.stack
+                message: error.message
             });
         }
     }
 
     async webhook(req, res) {
-        const signature = req.headers['x-cf-signature'];
-        const timestamp = req.headers['x-cf-timestamp'];
-        const rawBody = req.body; // Buffer (due to express.raw)
+        // Support both latest and legacy Cashfree headers
+        const signature = req.headers['x-webhook-signature'] || req.headers['x-cf-signature'];
+        const timestamp = req.headers['x-webhook-timestamp'] || req.headers['x-cf-timestamp'];
+        const rawBody = req.body; // Buffer (due to express.raw in server.js)
 
         console.log('[CASHFREE_WEBHOOK_RECEIVED]', {
-            headers: req.headers,
-            isBuffer: Buffer.isBuffer(rawBody),
-            bodyLength: rawBody?.length
+            timestamp: timestamp,
+            hasSignature: !!signature,
+            isBuffer: Buffer.isBuffer(rawBody)
         });
 
-        // 1. Detect Cashfree Dashboard Connectivity Test (no headers)
+        // 1. Connectivity Test (Cashfree sends this to verify webhook endpoint)
         if (!signature && !timestamp) {
-            console.log('[CASHFREE_WEBHOOK] Dashboard validation request received.');
-            return res.status(200).send('OK (Connectivity Test)');
+            console.log('[CASHFREE_WEBHOOK] Dashboad connectivity test.');
+            return res.status(200).send('OK');
         }
 
-        // 2. Validate Production Webhook Headers
-        if (!signature || !timestamp) {
-            console.error('[CASHFREE_ERROR] Missing production headers');
-            return res.status(400).send('Missing headers');
-        }
-
-        if (!rawBody || rawBody.length === 0) {
-            console.error('[CASHFREE_ERROR] Empty request body');
-            return res.status(400).send('Empty body');
+        if (!signature || !timestamp || !rawBody || rawBody.length === 0) {
+            console.error('[CASHFREE_WEBHOOK_ERROR] Missing headers or body');
+            return res.status(400).send('Invalid request');
         }
 
         try {
-            // Manual verification (v2023-08-01 format)
+            // 2. Signature Verification
             const isValid = PaymentService.verifyWebhookSignature(signature, rawBody.toString('utf-8'), timestamp);
-
             if (!isValid) {
-                console.error('[CASHFREE_ERROR] Invalid Signature');
                 return res.status(400).send('Invalid Signature');
             }
-            console.log('[CASHFREE_SIGNATURE_VALID]');
 
-            const body = JSON.parse(rawBody.toString('utf-8'));
+            const payload = JSON.parse(rawBody.toString('utf-8'));
+            const eventType = payload.type || payload.data?.event;
+            console.log(`[CASHFREE_EVENT] ${eventType}`);
 
-            if (body.data?.event === 'PAYMENT_SUCCESS_WEBHOOK') {
-                const payment = body.data.payment;
-                const order = body.data.order;
+            // 3. Process Successful Payment
+            if (eventType === 'PAYMENT_SUCCESS_WEBHOOK' || eventType === 'payment.success') {
+                const payment = payload.data.payment;
+                const order = payload.data.order;
 
-                // Idempotency
-                const isProcessed = await PaymentService.isPaymentAlreadyUsed(payment.cf_payment_id);
-                if (isProcessed) {
-                    console.warn('[CASHFREE_DUPLICATE_WEBHOOK]', payment.cf_payment_id);
-                    return res.status(200).send('Already processed');
+                // Idempotency check inside activateSubscription
+                const metaDoc = await db.collection('order_metadata').doc(order.order_id).get();
+                if (!metaDoc.exists) {
+                    console.error(`[CASHFREE_ERROR] Metadata not found for order: ${order.order_id}`);
+                    return res.status(200).send('Metadata missing, but OK (will retry or use status check)');
                 }
 
-                // Metadata lookup
-                const metaDoc = await db.collection('order_metadata').doc(order.order_id).get();
-                if (!metaDoc.exists) throw new Error('Order metadata not found');
                 const meta = metaDoc.data();
+                console.log(`[CASHFREE_ORDER_METADATA_FOUND] UID: ${meta.uid}`);
 
                 await PaymentService.activateSubscription(meta.uid, meta.planId, payment, meta.role);
-                console.log('[CASHFREE_PAYMENT_VERIFIED] Subscription activated');
             }
 
             res.status(200).send('OK');
         } catch (err) {
-            console.error('[CASHFREE_ERROR] Webhook processing:', err);
+            console.error('[CASHFREE_WEBHOOK_FAILED]', err);
             res.status(500).send('Internal Error');
         }
     }
 
+    /**
+     * Enhanced status check with auto-activation
+     */
     async getStatus(req, res) {
         const { orderId } = req.params;
+        console.log(`[CASHFREE_STATUS_CHECK] OrderID: ${orderId}`);
+
         try {
             const payments = await PaymentService.getPaymentStatus(orderId);
             const successPayment = payments.find(p => p.payment_status === 'SUCCESS');
+
+            if (successPayment) {
+                // If payment is SUCCESS, ensure subscription is activated (Self-Healing)
+                const isProcessed = await PaymentService.isPaymentAlreadyUsed(successPayment.cf_payment_id);
+
+                if (!isProcessed) {
+                    console.log("[CASHFREE_SELF_HEALING] Payment is SUCCESS but not activated. Activating now...");
+                    const metaDoc = await db.collection('order_metadata').doc(orderId).get();
+
+                    if (metaDoc.exists) {
+                        const meta = metaDoc.data();
+                        await PaymentService.activateSubscription(meta.uid, meta.planId, successPayment, meta.role);
+                        return res.json({
+                            success: true,
+                            status: 'SUCCESS',
+                            subscriptionActivated: true
+                        });
+                    }
+                }
+
+                return res.json({
+                    success: true,
+                    status: 'SUCCESS',
+                    subscriptionActivated: true
+                });
+            }
+
+            // If not successful yet
+            const currentStatus = payments.length > 0 ? payments[0].payment_status : 'PENDING';
             res.json({
                 success: true,
-                status: successPayment ? 'SUCCESS' : (payments.length > 0 ? payments[0].payment_status : 'PENDING')
+                status: currentStatus,
+                subscriptionActivated: false
             });
+
         } catch (error) {
-            console.error('[CASHFREE_ERROR] Get Status:', error);
+            console.error(`[CASHFREE_STATUS_API_ERROR] Order: ${orderId}`, error);
             res.status(500).json({ success: false, message: error.message });
         }
     }
