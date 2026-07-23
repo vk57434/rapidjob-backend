@@ -139,6 +139,20 @@ class PaymentService {
 
         await rtdb.ref(`subscriptions/${uid}`).set(subData);
 
+        // Add to RTDB Payment History for Android app
+        await rtdb.ref(`payments/${uid}/${paymentDetails.cf_payment_id}`).set({
+            paymentId: paymentDetails.cf_payment_id,
+            transactionId: paymentDetails.cf_payment_id,
+            planId: planId,
+            planName: planData.name,
+            gateway: 'CASHFREE',
+            amount: paymentDetails.order_amount,
+            currency: 'INR',
+            paymentStatus: 'SUCCESS',
+            purchaseDate: now,
+            expiryDate: expiry
+        });
+
         const isRecruiter = planData.maxJobPosts > 0;
         const collection = isRecruiter ? 'subscriptions' : 'jobSeekerSubscriptions';
         await db.collection(collection).doc(uid).set({
