@@ -146,10 +146,6 @@ class PaymentService {
                     customer_name: (userData.name || 'User').substring(0, 30),
                     customer_email: userData.email || 'no-email@rapidjob.com',
                     customer_phone: (userData.phone || '9999999999').toString()
-                },
-                order_meta: {
-                    return_url: "https://www.cashfree.com/devguide/sdk/android/payments/return-url",
-                    payment_methods: ""
                 }
             };
 
