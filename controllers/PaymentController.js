@@ -38,8 +38,7 @@ class PaymentController {
 
         console.log('[CASHFREE_WEBHOOK_RECEIVED]', {
             timestamp: timestamp,
-            hasSignature: !!signature,
-            isBuffer: Buffer.isBuffer(rawBody)
+            hasSignature: !!signature
         });
 
         // 1. Connectivity Test (Cashfree sends this to verify webhook endpoint)

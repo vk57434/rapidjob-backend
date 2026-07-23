@@ -2,7 +2,7 @@ const axios = require('axios');
 const crypto = require('crypto');
 const { rtdb, db, admin } = require('../firebase-admin');
 
-const CASHFREE_BASE_URL = process.env.CASHFREE_BASE_URL || 'https://sandbox.cashfree.com/pg';
+const CASHFREE_BASE_URL = process.env.CASHFREE_BASE_URL || 'https://api.cashfree.com/pg';
 
 /**
  * PaymentService - Production Ready Cashfree Integration
@@ -14,8 +14,8 @@ class PaymentService {
         this.clientSecret = process.env.CASHFREE_CLIENT_SECRET;
         this.apiVersion = process.env.CASHFREE_API_VERSION || '2023-08-01';
 
-        console.log("[CASHFREE_INIT]", {
-            ENV: process.env.CASHFREE_ENV || 'SANDBOX',
+        console.log("[CASHFREE_INIT_PRODUCTION]", {
+            ENV: process.env.CASHFREE_ENV || 'PRODUCTION',
             URL: CASHFREE_BASE_URL,
             CLIENT_ID: this.clientId ? "SET" : "MISSING",
             API_VERSION: this.apiVersion
@@ -191,6 +191,10 @@ class PaymentService {
 
         console.log("[CASHFREE_FIELDS]", { uid, planId, paymentId, orderId, amount, status });
 
+        if (status === 'SUCCESS') {
+            console.log(`[CASHFREE_PAYMENT_SUCCESS] PaymentID: ${paymentId}`);
+        }
+
         // 1. Idempotency Check
         const isProcessed = await this.isPaymentAlreadyUsed(paymentId);
         if (isProcessed) {
@@ -263,7 +267,8 @@ class PaymentService {
                 }, { merge: true });
                 await db.collection('payments').doc(paymentId).set(paymentRecord);
                 firestoreSuccess = true;
-                console.log("[CASHFREE_FIRESTORE_SUCCESS]");
+                console.log("[CASHFREE_FIRESTORE_UPDATED]");
+                console.log("[CASHFREE_PAYMENT_HISTORY_UPDATED]");
             };
 
             // --- RTDB Operation ---
@@ -271,7 +276,7 @@ class PaymentService {
                 await rtdb.ref(`subscriptions/${uid}`).set(subData);
                 await rtdb.ref(`payments/${uid}/${paymentId}`).set(paymentRecord);
                 rtdbSuccess = true;
-                console.log("[CASHFREE_RTDB_SUCCESS]");
+                console.log("[CASHFREE_RTDB_UPDATED]");
             };
 
             // Execute both
@@ -292,7 +297,7 @@ class PaymentService {
                 throw new Error("Both databases failed to update.");
             }
 
-            console.log("[CASHFREE_SUBSCRIPTION_SUCCESS] UID:", uid);
+            console.log("[CASHFREE_SUBSCRIPTION_ACTIVATED] UID:", uid);
             console.log("[CASHFREE_WEBHOOK_COMPLETE]");
             return { success: true, subData };
 
