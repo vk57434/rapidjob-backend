@@ -4,6 +4,10 @@ const { rtdb, db, admin } = require('../firebase-admin');
 
 const CASHFREE_BASE_URL = process.env.CASHFREE_BASE_URL || 'https://sandbox.cashfree.com/pg';
 
+/**
+ * PaymentService - Production Ready Cashfree Integration
+ * Handles Order Creation, Webhook Verification, and Subscription Activation.
+ */
 class PaymentService {
     constructor() {
         this.clientId = process.env.CASHFREE_CLIENT_ID;
@@ -27,6 +31,77 @@ class PaymentService {
         };
     }
 
+    // ─────────────────────────────────────────────────────────────────────────────
+    // UTILITY HELPERS
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Recursively removes all undefined and null values from an object.
+     * Prevents Firebase "value argument contains undefined" errors.
+     */
+    removeUndefinedFields(obj) {
+        if (obj === null || typeof obj !== 'object') return obj;
+
+        if (Array.isArray(obj)) {
+            return obj.map(item => this.removeUndefinedFields(item));
+        }
+
+        return Object.fromEntries(
+            Object.entries(obj)
+                .filter(([_, v]) => v !== undefined && v !== null)
+                .map(([k, v]) => [k, this.removeUndefinedFields(v)])
+        );
+    }
+
+    /**
+     * Extracts essential payment fields from various Cashfree webhook formats.
+     */
+    extractPaymentFields(payload) {
+        const paymentId =
+            payload?.cf_payment_id ??
+            payload?.payment_id ??
+            payload?.payment?.cf_payment_id ??
+            payload?.payment?.payment_id ??
+            payload?.data?.payment?.cf_payment_id ??
+            payload?.data?.payment?.payment_id;
+
+        const orderId =
+            payload?.order_id ??
+            payload?.cf_order_id ??
+            payload?.order?.order_id ??
+            payload?.payment?.order_id ??
+            payload?.data?.order?.order_id ??
+            payload?.data?.payment?.order_id ??
+            null;
+
+        const amount =
+            payload?.payment_amount ??
+            payload?.order_amount ??
+            payload?.payment?.payment_amount ??
+            payload?.data?.payment?.payment_amount ??
+            0;
+
+        const status = payload?.payment_status ?? payload?.payment?.payment_status ?? payload?.data?.payment?.payment_status ?? "SUCCESS";
+
+        return { paymentId, orderId, amount, status };
+    }
+
+    /**
+     * Validates that all required fields for subscription activation are present.
+     */
+    validatePayment(uid, planId, paymentId, amount) {
+        if (!uid) throw new Error("[CASHFREE_VALIDATION_ERROR] Missing userId (uid).");
+        if (!planId) throw new Error("[CASHFREE_VALIDATION_ERROR] Missing planId.");
+        if (!paymentId) throw new Error("[CASHFREE_VALIDATION_ERROR] Missing paymentId.");
+        if (parseFloat(amount) <= 0) throw new Error(`[CASHFREE_VALIDATION_ERROR] Invalid amount: ${amount}`);
+
+        console.log("[CASHFREE_VALIDATION_SUCCESS]");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // ORDER MANAGEMENT
+    // ─────────────────────────────────────────────────────────────────────────────
+
     async createOrder(uid, planId, userRole) {
         console.log(`[CASHFREE_ORDER_START] UID: ${uid}, Plan: ${planId}, Role: ${userRole}`);
         
@@ -40,11 +115,9 @@ class PaymentService {
             const planData = planDoc.data();
             const userData = userDoc.exists ? userDoc.data() : { name: 'User', email: 'no-email@rapidjob.com', phone: '9999999999' };
 
-            // Use totalPayable (inclusive of GST) if available, fallback to price
             const amount = parseFloat(planData.totalPayable || planData.price);
             const orderId = `ord_${uid.substring(0, 8)}_${Date.now()}`;
 
-            // Save metadata for webhook/status recovery
             await db.collection('order_metadata').doc(orderId).set({
                 uid,
                 planId,
@@ -81,13 +154,13 @@ class PaymentService {
         }
     }
 
-    /**
-     * Verifies the webhook signature for Cashfree API v2023-08-01
-     */
+    // ─────────────────────────────────────────────────────────────────────────────
+    // WEBHOOK & ACTIVATION
+    // ─────────────────────────────────────────────────────────────────────────────
+
     verifyWebhookSignature(signature, rawBody, timestamp) {
         try {
             if (!signature || !timestamp || !rawBody) return false;
-
             const data = timestamp + rawBody;
             const expectedSignature = crypto
                 .createHmac('sha256', this.clientSecret)
@@ -98,11 +171,7 @@ class PaymentService {
             if (isValid) {
                 console.log("[CASHFREE_SIGNATURE_VALID]");
             } else {
-                console.error("[CASHFREE_SIGNATURE_INVALID]", {
-                    received: signature,
-                    expected: expectedSignature,
-                    timestamp: timestamp
-                });
+                console.error("[CASHFREE_SIGNATURE_INVALID]");
             }
             return isValid;
         } catch (error) {
@@ -111,46 +180,44 @@ class PaymentService {
         }
     }
 
-    async getPaymentStatus(orderId) {
-        try {
-            const response = await axios.get(`${CASHFREE_BASE_URL}/orders/${orderId}/payments`, {
-                headers: this.getHeaders()
-            });
-            return response.data; // This is an array of payment objects
-        } catch (error) {
-            console.error(`[CASHFREE_STATUS_ERROR] Order: ${orderId}`, error.response?.data || error.message);
-            throw error;
-        }
-    }
-
     /**
-     * Production-ready activation logic with idempotency and cross-database sync
+     * Core logic to activate subscription across Firestore and RTDB.
+     * Features Idempotency, Retries, and Null-Safety.
      */
-    async activateSubscription(uid, planId, paymentDetails, userRole = null) {
-        const paymentId = paymentDetails.cf_payment_id || paymentDetails.payment_id;
-        console.log(`[CASHFREE_ACTIVATION_START] UID: ${uid}, Plan: ${planId}, Payment: ${paymentId}`);
+    async activateSubscription(uid, planId, rawPayload, userRole = null) {
+        console.log("[CASHFREE_WEBHOOK_PAYLOAD]", JSON.stringify(rawPayload, null, 2));
 
-        // 1. Idempotency Check (Prevent duplicate activation)
+        const { paymentId, orderId, amount, status } = this.extractPaymentFields(rawPayload);
+
+        console.log("[CASHFREE_FIELDS]", { uid, planId, paymentId, orderId, amount, status });
+
+        // 1. Idempotency Check
         const isProcessed = await this.isPaymentAlreadyUsed(paymentId);
         if (isProcessed) {
-            console.warn(`[CASHFREE_ALREADY_PROCESSED] Payment: ${paymentId}. Skipping activation.`);
-            return { alreadyProcessed: true };
+            console.warn(`[CASHFREE_ALREADY_PROCESSED] Payment: ${paymentId}.`);
+            return { success: true, alreadyProcessed: true };
+        }
+
+        // 2. Validation
+        try {
+            this.validatePayment(uid, planId, paymentId, amount);
+        } catch (err) {
+            console.error("[CASHFREE_WEBHOOK_ERROR]", err.message);
+            throw err;
         }
 
         try {
-            // 2. Fetch Plan Details
+            // 3. Fetch Plan Details
             const planDoc = await db.collection('plans').doc(planId).get();
-            if (!planDoc.exists) {
-                console.error(`[CASHFREE_ERROR] Plan ${planId} not found in Firestore`);
-                throw new Error('Plan not found');
-            }
+            if (!planDoc.exists) throw new Error(`Plan ${planId} not found in Firestore`);
             const planData = planDoc.data();
 
             const now = Date.now();
             const durationDays = planData.durationDays || planData.duration || 0;
             const expiry = durationDays > 0 ? now + (durationDays * 24 * 60 * 60 * 1000) : 0;
 
-            const subData = {
+            // 4. Build Data Models
+            const subData = this.removeUndefinedFields({
                 userId: uid,
                 planId: planId,
                 planName: planData.name,
@@ -163,77 +230,98 @@ class PaymentService {
                 paymentGateway: 'CASHFREE',
                 active: true,
                 updatedAt: now
-            };
+            });
 
-            // 3. Update RTDB (Immediate Dashboard Sync)
-            const rtdbTasks = [
-                rtdb.ref(`subscriptions/${uid}`).set({ ...subData }),
-                rtdb.ref(`payments/${uid}/${paymentId}`).set({
-                    paymentId: paymentId,
-                    transactionId: paymentId,
-                    orderId: paymentDetails.order_id,
-                    planId: planId,
-                    planName: planData.name,
-                    gateway: 'CASHFREE',
-                    amount: paymentDetails.order_amount || paymentDetails.payment_amount,
-                    currency: 'INR',
-                    paymentStatus: 'SUCCESS',
-                    purchaseDate: now,
-                    expiryDate: expiry
-                })
-            ];
+            const paymentRecord = this.removeUndefinedFields({
+                paymentId,
+                transactionId: paymentId,
+                orderId,
+                planId,
+                planName: planData.name,
+                gateway: 'CASHFREE',
+                amount: parseFloat(amount),
+                currency: 'INR',
+                paymentStatus: status,
+                purchaseDate: now,
+                expiryDate: expiry,
+                userId: uid,
+                status: 'SUCCESS', // Firestore field
+                timestamp: admin.firestore.FieldValue.serverTimestamp() // Firestore field
+            });
 
-            await Promise.all(rtdbTasks);
-            console.log("[CASHFREE_RTDB_UPDATED]");
+            // 5. Database Execution with Retry Logic
+            let firestoreSuccess = false;
+            let rtdbSuccess = false;
 
-            // 4. Update Firestore
-            let collection = 'subscriptions'; // Default recruiter
-            if (userRole === 'JOB_SEEKER') {
-                collection = 'jobSeekerSubscriptions';
-            } else if (!userRole) {
-                // Fallback: check if plan is seeker plan
-                const isRecruiter = (planData.maxJobPosts && planData.maxJobPosts > 0) || !planId.startsWith('seeker_');
-                collection = isRecruiter ? 'subscriptions' : 'jobSeekerSubscriptions';
-            }
-
-            const firestoreTasks = [
-                // Update Subscription
-                db.collection(collection).doc(uid).set({
+            // --- Firestore Operation ---
+            const performFirestore = async () => {
+                const collection = (userRole === 'JOB_SEEKER' || planId.startsWith('seeker_')) ? 'jobSeekerSubscriptions' : 'subscriptions';
+                await db.collection(collection).doc(uid).set({
                     ...subData,
                     expiryAt: expiry > 0 ? admin.firestore.Timestamp.fromMillis(expiry) : null,
                     updatedAt: admin.firestore.FieldValue.serverTimestamp()
-                }, { merge: true }),
+                }, { merge: true });
+                await db.collection('payments').doc(paymentId).set(paymentRecord);
+                firestoreSuccess = true;
+                console.log("[CASHFREE_FIRESTORE_SUCCESS]");
+            };
 
-                // Record Payment
-                db.collection('payments').doc(paymentId).set({
-                    id: paymentId,
-                    orderId: paymentDetails.order_id,
-                    userId: uid,
-                    amount: paymentDetails.order_amount || paymentDetails.payment_amount,
-                    currency: 'INR',
-                    planId,
-                    planName: planData.name,
-                    gateway: 'CASHFREE',
-                    status: 'SUCCESS',
-                    timestamp: admin.firestore.FieldValue.serverTimestamp()
-                })
-            ];
+            // --- RTDB Operation ---
+            const performRTDB = async () => {
+                await rtdb.ref(`subscriptions/${uid}`).set(subData);
+                await rtdb.ref(`payments/${uid}/${paymentId}`).set(paymentRecord);
+                rtdbSuccess = true;
+                console.log("[CASHFREE_RTDB_SUCCESS]");
+            };
 
-            await Promise.all(firestoreTasks);
-            console.log(`[CASHFREE_FIRESTORE_UPDATED] Collection: ${collection}`);
+            // Execute both
+            try { await performFirestore(); } catch (e) { console.error("[CASHFREE_FIRESTORE_FAIL]", e.message); }
+            try { await performRTDB(); } catch (e) { console.error("[CASHFREE_RTDB_FAIL]", e.message); }
 
-            console.log(`[CASHFREE_ACTIVATION_COMPLETE] UID: ${uid}, Payment: ${paymentId}`);
+            // Cross-Database Retries
+            if (firestoreSuccess && !rtdbSuccess) {
+                console.log("[CASHFREE_RETRY] Retrying RTDB...");
+                try { await performRTDB(); } catch (e) { console.error("[CASHFREE_RTDB_RETRY_FAILED]", e.message); }
+            }
+            if (rtdbSuccess && !firestoreSuccess) {
+                console.log("[CASHFREE_RETRY] Retrying Firestore...");
+                try { await performFirestore(); } catch (e) { console.error("[CASHFREE_FIRESTORE_RETRY_FAILED]", e.message); }
+            }
+
+            if (!firestoreSuccess && !rtdbSuccess) {
+                throw new Error("Both databases failed to update.");
+            }
+
+            console.log("[CASHFREE_SUBSCRIPTION_SUCCESS] UID:", uid);
+            console.log("[CASHFREE_WEBHOOK_COMPLETE]");
             return { success: true, subData };
+
         } catch (error) {
-            console.error(`[CASHFREE_ACTIVATION_FAILED] UID: ${uid}`, error);
+            console.error("[CASHFREE_WEBHOOK_ERROR]", error.message);
+            throw error;
+        }
+    }
+
+    async getPaymentStatus(orderId) {
+        try {
+            const response = await axios.get(`${CASHFREE_BASE_URL}/orders/${orderId}/payments`, {
+                headers: this.getHeaders()
+            });
+            return response.data;
+        } catch (error) {
+            console.error(`[CASHFREE_STATUS_ERROR] Order: ${orderId}`, error.response?.data || error.message);
             throw error;
         }
     }
 
     async isPaymentAlreadyUsed(paymentId) {
         if (!paymentId) return false;
-        const doc = await db.collection('payments').doc(paymentId).get();
-        return doc.exists;
+        try {
+            const doc = await db.collection('payments').doc(paymentId).get();
+            return doc.exists;
+        } catch (e) {
+            return false;
+        }
     }
 }
 
