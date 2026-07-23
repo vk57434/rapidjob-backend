@@ -39,7 +39,8 @@ class PaymentService {
         const planData = planDoc.data();
         const userData = userDoc.exists ? userDoc.data() : { name: 'User', email: 'no-email@rapidjob.com', phone: '9999999999' };
 
-        const amount = parseFloat(planData.price);
+        // Use totalPayable (inclusive of GST) instead of base price
+        const amount = parseFloat(planData.totalPayable || planData.price);
         const orderId = `ord_${uid.substring(0, 8)}_${Date.now()}`;
 
         await db.collection('order_metadata').doc(orderId).set({
