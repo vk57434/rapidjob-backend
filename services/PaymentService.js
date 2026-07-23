@@ -4,9 +4,13 @@ const { rtdb, db, admin } = require('../firebase-admin');
 
 const CASHFREE_BASE_URL = process.env.CASHFREE_BASE_URL || 'https://api.cashfree.com/pg';
 
+// ─── TEMPORARY PRODUCTION TEST CONFIG ──────────────────────────────────────────
+const ENABLE_TEMP_PRODUCTION_TEST = true; // Set to FALSE to revert prices
+const TEMP_TEST_PRICE = 2; // Fixed price in INR for testing
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
  * PaymentService - Production Ready Cashfree Integration
- * Handles Order Creation, Webhook Verification, and Subscription Activation.
  */
 class PaymentService {
     constructor() {
@@ -115,7 +119,13 @@ class PaymentService {
             const planData = planDoc.data();
             const userData = userDoc.exists ? userDoc.data() : { name: 'User', email: 'no-email@rapidjob.com', phone: '9999999999' };
 
-            const amount = parseFloat(planData.totalPayable || planData.price);
+            // TEMPORARY PRODUCTION TEST PLAN - REVERT AFTER PAYMENT TEST
+            let amount = parseFloat(planData.totalPayable || planData.price);
+            if (ENABLE_TEMP_PRODUCTION_TEST && planId === 'multiple_hire_annual') {
+                console.log(`[CASHFREE_TEST_MODE] Overriding price for ${planId} to ₹${TEMP_TEST_PRICE}`);
+                amount = TEMP_TEST_PRICE;
+            }
+
             const orderId = `ord_${uid.substring(0, 8)}_${Date.now()}`;
 
             await db.collection('order_metadata').doc(orderId).set({
