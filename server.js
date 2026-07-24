@@ -40,6 +40,7 @@ const companyRoutes = require('./routes/company.routes');
 const userRoutes = require('./routes/user.routes');
 const emailRoutes = require('./routes/email.routes');
 const adminRoutes = require('./routes/admin.routes');
+const aiRoutes = require('./routes/ai.routes');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/waapi', waapiRoutes);
@@ -52,6 +53,7 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
 app.use('/api/companies', companyRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/ai', aiRoutes);
 app.use('/api', userRoutes); // /api/profile
 app.use('/api/email', emailRoutes);
 
